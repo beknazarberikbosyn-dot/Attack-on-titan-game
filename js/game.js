@@ -6,7 +6,8 @@ window.AOT = window.AOT || {};
   const G = (A.G = {});
   let nextId = 1;
 
-  const GATE_X = () => W.wallX + W.wallW;
+  const SDE = (e) => A.sdRose(e.x, e.y);
+  const HALF = () => A.WALL_T.rose / 2;
 
   // ---------- Журнал, всплывающий текст, частицы ----------
   A.log = function (who, text, kind) {
@@ -62,7 +63,8 @@ window.AOT = window.AOT || {};
       speed: 1, paused: false,
     });
     A.CARDS.forEach((c) => { G.hand[c.id] = 0; });
-    A.log('Штаб', 'Разведка: с востока к Стене Роза идут титаны. Купите карточки в казарме и расставьте бойцов — волна начнётся по таймеру или по кнопке «В бой».', 'info');
+    G.nextQueue = prepQueue(1);
+    A.log('Штаб', 'Стена Мария пала. Разведка: титаны идут из павших земель к району Трост (юг Стены Роза). Купите карточки и расставьте бойцов у Троста — волна начнётся по таймеру или по кнопке «В бой».', 'info');
   };
 
   // ---------- Экономика ----------
@@ -87,14 +89,17 @@ window.AOT = window.AOT || {};
   A.fieldCount = () => G.units.filter((u) => !u.dead && u.state !== 'safe').length;
   A.fieldCap = () => 6 + Math.floor(G.wave * 0.6);
 
-  A.canDeploy = function (card, x, y) {
-    if (A.fieldCount() >= A.fieldCap()) return { ok: false, reason: `Лимит бойцов на поле: ${A.fieldCap()}` };
-    if (y < 16 || y > W.H - 16 || x < 10) return { ok: false, reason: 'За краем карты' };
-    if (x > W.deployMaxX) return { ok: false, reason: 'Слишком далеко за стеной' };
-    const onWall = x >= W.wallX - 2 && x <= GATE_X() + 2;
-    if (card.wallOnly && !onWall) return { ok: false, reason: 'Только на стене' };
+  A.canDeploy = function (card, x, y, moving) {
+    if (!moving && A.fieldCount() >= A.fieldCap()) return { ok: false, reason: `Лимит бойцов на поле: ${A.fieldCap()}` };
+    if (y < 16 || y > W.H - 16 || x < 10 || x > W.W - 10) return { ok: false, reason: 'За краем карты' };
+    const sd = A.sdRose(x, y);
+    if (sd > A.DEPLOY_OUT) return { ok: false, reason: 'Слишком далеко за Стеной Роза' };
+    const ter = A.terrainAt(x, y);
+    if (ter === 'sea') return { ok: false, reason: 'Это море' };
+    const onWall = Math.abs(sd) <= HALF() + 3;
+    if (card.wallOnly && !onWall) return { ok: false, reason: 'Только на Стене Роза' };
     if (card.id === 'eren' && onWall) return { ok: false, reason: 'Превращаться на стене нельзя' };
-    if (A.inRiver(x, y) && x > GATE_X()) return { ok: false, reason: 'В реке не встать' };
+    if (ter === 'river') return { ok: false, reason: 'В воде не встать' };
     return { ok: true, onWall };
   };
 
@@ -116,8 +121,9 @@ window.AOT = window.AOT || {};
   A.nearestSupply = nearestSupply;
 
   function spawnUnit(card, x, y, onWall) {
-    const outside = x > GATE_X();
-    const start = onWall ? { x: W.wallX + W.wallW / 2, y } : outside ? { x: GATE_X() + 6, y: W.gateY + A.rand(-20, 20) } : nearestSupply(x, y);
+    // солдаты спрыгивают со стены на тросах; в тыл идут от складов
+    const sdP = A.sdRose(x, y);
+    const start = onWall ? { x, y } : sdP > 0 ? A.wallPoint(x, y, 0) : nearestSupply(x, y);
     const u = {
       id: nextId++, kind: 'unit', card, x: start.x, y: start.y, z: 0,
       post: { x, y }, onWall: !!onWall, state: 'deploy', target: null,
@@ -131,7 +137,7 @@ window.AOT = window.AOT || {};
       u.state = 'deploy'; u.form = 'human'; u.titanHp = card.titanHp; u.titanMax = card.titanHp; u.stamina = card.stamina;
       u.thought = 'Бежит к месту превращения';
     }
-    if (card.wallOnly) { u.state = 'idle'; u.x = x; u.y = y; u.thought = 'Командует с бастиона'; }
+    if (card.wallOnly) { u.thought = 'Командует с бастиона'; }
     if (card.ability === 'commander' && !G.erwinSupplied) {
       G.erwinSupplied = true;
       const add = 4;
@@ -153,7 +159,7 @@ window.AOT = window.AOT || {};
     return true;
   };
   A.relocate = function (u, x, y) {
-    const can = A.canDeploy(u.card, x, y);
+    const can = A.canDeploy(u.card, x, y, true);
     if (!can.ok) return can;
     if (u.card.ability === 'shifter' && u.form !== 'titan') return { ok: false, reason: 'Сейчас не может' };
     u.post = { x, y }; u.onWall = can.onWall; u.target = null; u.order = null;
@@ -164,7 +170,7 @@ window.AOT = window.AOT || {};
 
   // ---------- Свойства юнитов ----------
   A.unitAlive = (u) => !u.dead && u.state !== 'safe';
-  function inTown(u) { return u.x < W.wallX - 2; }
+  function inTown(u) { return SDE(u) < -HALF() - 2; }
   function reachable(u) { return A.unitAlive(u) && !u.onWall && !inTown(u); }
   A.reachable = reachable;
 
@@ -225,17 +231,28 @@ window.AOT = window.AOT || {};
     opts = opts || {};
     const t = {
       id: nextId++, kind: 'titan', type, def,
-      x: opts.x != null ? opts.x : W.spawnX + A.rand(0, 20),
-      y: opts.y != null ? opts.y : A.rand(110, W.H - 110),
+      x: 0, y: 0, district: opts.district != null ? opts.district : 0,
       hp: def.hp * G.hpMul, maxHp: def.hp * G.hpMul, armor: def.armor || 0,
-      laneOff: A.clamp(A.rand(-420, 420), -W.gateY + 70, W.H - W.gateY - 70),
+      laneOff: A.rand(-1.1, 1.1),
       atkT: A.rand(0.5, 2), blindT: 0, stunT: 0, markT: 0, rootT: 0, hardenT: 0, hardenCd: 0,
       forced: null, forcedT: 0, enrageT: 0, grabT: 0, disarmT: 0, distractT: 0, hitFlash: 0,
       leapT: A.rand(2, 5), leap: null, throwT: 3, wallHitT: 0, steamOn: false, steamT: 6, steamTick: 0,
       anim: A.rand(0, 10), variant: A.randInt(0, 11), dead: false, deadT: 0, screamed: false, retreating: false,
       spearHits: 0,
     };
-    if (opts.near) { t.x = opts.near.x + A.rand(80, 220); t.y = A.clamp(opts.near.y + A.rand(-120, 120), 60, W.H - 60); }
+    if (opts.near) { t.x = opts.near.x + A.rand(-180, 180); t.y = opts.near.y + A.rand(-180, 180); t.district = opts.near.district || 0; }
+    else if (opts.x != null) { t.x = opts.x; t.y = opts.y; }
+    else {
+      // появляются в павших землях Марии напротив атакуемого района (иногда — через пролом Шиганшины)
+      const D = A.DISTRICTS[t.district];
+      for (let k = 0; k < 8; k++) {
+        const a = D.ang + A.rand(-0.45, 0.45), rr = A.R.maria - A.rand(45, 120);
+        t.x = A.C.x + Math.cos(a) * rr; t.y = A.C.y + Math.sin(a) * rr;
+        if (t.district === 0 && A.chance(0.3)) { const S = A.MARIA_D[0]; t.x = S.cx + A.rand(-40, 40); t.y = S.cy - A.rand(10, 70); }
+        if (!A.inRiver(t.x, t.y)) break;
+      }
+    }
+    clampTitan(t);
     G.titans.push(t);
     if (def.special) {
       A.log('Дозор', `На горизонте: ${def.name}! ${def.desc}`, 'warn');
@@ -244,8 +261,11 @@ window.AOT = window.AOT || {};
     return t;
   };
 
+  // титаны тянутся к выступу района — для этого районы и строили
   function gateTarget(t) {
-    return { x: GATE_X() + t.def.w * 0.5 + 1, y: W.gateY + t.laneOff };
+    const D = A.DISTRICTS[t.district || 0];
+    const a = D.ang + t.laneOff, rr = D.r + HALF() + t.def.w * 0.5 + 1;
+    return { x: D.cx + Math.cos(a) * rr, y: D.cy + Math.sin(a) * rr };
   }
 
   A.damageTitan = function (t, dmg, src, opts) {
@@ -358,12 +378,12 @@ window.AOT = window.AOT || {};
         A.log('Дозор', 'Звероподобный тяжело ранен и отступает за горизонт! Успейте добить!', 'warn');
       }
       if (t.retreating) {
-        moveEnt(t, W.spawnX + 40, t.y, spd * 2.2, dt);
-        if (t.x >= W.spawnX + 30) { t.dead = true; t.deadT = 99; t.escaped = true; A.log('Дозор', 'Звероподобный ушёл. Баллов за него не будет.', 'warn'); }
+        const n = A.roseNormal(t.x, t.y);
+        moveEnt(t, t.x + n.x * 100, t.y + n.y * 100, spd * 2.2, dt);
+        if (A.rFromC(t.x, t.y) >= A.R.maria - 40) { t.dead = true; t.deadT = 99; t.escaped = true; A.log('Дозор', 'Звероподобный ушёл. Баллов за него не будет.', 'warn'); }
         titanMelee(t); return;
       }
-      const holdX = GATE_X() + def.holdOffset;
-      if (t.x > holdX + 2) moveEnt(t, holdX, A.lerp(t.y, W.gateY, 0.002), spd, dt);
+      if (SDE(t) > def.holdSd + 2) { const g = gateTarget(t); moveEnt(t, g.x, g.y, spd, dt); }
       else if (t.disarmT <= 0 && t.distractT <= 0) {
         t.throwT -= dt;
         if (t.throwT <= 0) {
@@ -385,7 +405,11 @@ window.AOT = window.AOT || {};
         t.leapT = A.rand(2.5, 5.5);
         let tx, ty;
         if (tgt && A.chance(0.5)) { tx = tgt.x; ty = tgt.y; }
-        else { tx = t.x - A.rand(40, 140); ty = t.y + A.rand(-130, 130); if (A.chance(0.35)) t.ignoreT = 3; }
+        else {
+          const n = A.roseNormal(t.x, t.y), f = A.rand(40, 140), sd = A.rand(-130, 130);
+          tx = t.x - n.x * f + n.y * sd; ty = t.y - n.y * f - n.x * sd;
+          if (A.chance(0.35)) t.ignoreT = 3;
+        }
         const d = Math.hypot(tx - t.x, ty - t.y) || 1;
         t.leap = { vx: (tx - t.x) / d * spd * 4.5, vy: (ty - t.y) / d * spd * 4.5, time: Math.min(0.8, d / (spd * 4.5)) };
         A.float(t.x, t.y - def.h - 4, '!', '#ffcf6a');
@@ -399,8 +423,7 @@ window.AOT = window.AOT || {};
     let tx, ty;
     if (tgt) { tx = tgt.x; ty = tgt.y; } else { const g = gateTarget(t); tx = g.x; ty = g.y; }
     if (def.charge && !tgt) {
-      const dg = A.distXY(t.x, t.y, GATE_X(), W.gateY);
-      if (dg < 620 && t.wallHitT <= 0) { spd = def.charge * G.spdMul; t.charging = true; }
+      if (SDE(t) < 380 && t.wallHitT <= 0) { spd = def.charge * G.spdMul; t.charging = true; }
     }
     const reach = def.reach + def.w * 0.5;
     if (!(tgt && A.dist(t, tgt) < reach * 0.8)) moveEnt(t, tx, ty, spd, dt);
@@ -410,33 +433,37 @@ window.AOT = window.AOT || {};
   }
 
   function clampTitan(t) {
-    const minX = GATE_X() + t.def.w * 0.5;
-    if (t.x < minX) t.x = minX;
-    t.y = A.clamp(t.y, 30, W.H - 20);
+    const n = A.roseNormal(t.x, t.y);
+    const min = HALF() + t.def.w * 0.5;
+    if (n.sd < min) { t.x += n.x * (min - n.sd); t.y += n.y * (min - n.sd); }
+    const rr = A.rFromC(t.x, t.y), mx = A.R.maria - 20;
+    if (rr > mx) { t.x = A.C.x + (t.x - A.C.x) * mx / rr; t.y = A.C.y + (t.y - A.C.y) * mx / rr; }
   }
 
   function wallContact(t, dt) {
-    if (t.x > GATE_X() + t.def.w * 0.5 + 1.5) return;
+    if (SDE(t) > HALF() + t.def.w * 0.5 + 1.5) return;
+    const wp = A.wallPoint(t.x, t.y, HALF() + 2);
+    G.lastHit = t.district;
     if (t.def.charge && t.charging) {
       G.wallHp -= G.wallMax * t.def.wallHit;
-      G.shake = 0.8; t.charging = false; t.wallHitT = 15; t.x += 60;
-      A.dust(GATE_X() + 4, t.y, 2);
+      G.shake = 0.8; t.charging = false; t.wallHitT = 15; t.x += wp.nx * 60; t.y += wp.ny * 60;
+      A.dust(wp.x, wp.y, 2);
       A.log('Стена', `Бронированный протаранил стену! (−${Math.round(t.def.wallHit * 100)}% прочности)`, 'warn');
       return;
     }
     if (t.def.steam && !t.kicked) {
       t.kicked = true;
       G.wallHp -= G.wallMax * t.def.wallHit; G.shake = 1.5;
-      A.dust(GATE_X() + 4, t.y, 3);
+      A.dust(wp.x, wp.y, 3);
       A.log('Стена', `Колоссальный ударил по стене! (−${Math.round(t.def.wallHit * 100)}% прочности)`, 'warn');
     }
     G.wallHp -= t.def.wallDps * dt;
     t.atWall = true;
-    if (Math.random() < dt * 0.8) A.dust(GATE_X() + 2, t.y + A.rand(-6, 6), 0.4);
+    if (Math.random() < dt * 0.8) A.dust(wp.x + A.rand(-5, 5), wp.y + A.rand(-5, 5), 0.4);
   }
 
   function colossalSteam(t, dt) {
-    if (t.x > W.spawnX - 150) return;
+    if (SDE(t) > 520) return;
     t.steamT -= dt;
     if (t.steamT <= 0) {
       t.steamOn = !t.steamOn;
@@ -461,7 +488,7 @@ window.AOT = window.AOT || {};
 
   function beastThrow(t) {
     const range = t.def.throwRange;
-    const cands = G.units.filter((u) => A.unitAlive(u) && A.dist(t, u) < range && u.x > W.wallX - 60);
+    const cands = G.units.filter((u) => A.unitAlive(u) && A.dist(t, u) < range && SDE(u) > -60);
     let tx, ty, onWallOnly = false;
     const chargers = cands.filter((u) => u.order && u.order.kind === 'charge');
     const pool = chargers.length ? chargers : cands;
@@ -474,7 +501,7 @@ window.AOT = window.AOT || {};
         if (s > bs) { bs = s; best = u; }
       }
       tx = best.x + A.rand(-10, 10); ty = best.y + A.rand(-10, 10);
-    } else { tx = GATE_X() + 6; ty = W.gateY + A.rand(-40, 40); onWallOnly = true; }
+    } else { const wp = A.wallPoint(t.x, t.y, 0); tx = wp.x + A.rand(-20, 20); ty = wp.y + A.rand(-20, 20); onWallOnly = true; }
     t.grabT = 0.8;
     A.float(t.x, t.y - t.def.h - 6, 'Бросок!', '#e0d0b0');
     for (let i = 0; i < 4; i++) {
@@ -488,7 +515,7 @@ window.AOT = window.AOT || {};
   function rockLand(x, y, wallShot) {
     A.dust(x, y, 1.1);
     G.shake = Math.max(G.shake, 0.3);
-    if (wallShot || (x > W.wallX - 4 && x < GATE_X() + 4)) G.wallHp -= G.wallMax * 0.003;
+    if (wallShot || A.onRoseWall(x, y)) G.wallHp -= G.wallMax * 0.003;
     let n = 0;
     for (const u of G.units) {
       if (!A.unitAlive(u) || A.distXY(u.x, u.y, x, y) > 34) continue;
@@ -503,7 +530,7 @@ window.AOT = window.AOT || {};
 
   // ---------- Юниты ----------
   function moveUnit(u, x, y, dt, mul) {
-    const a = u.onWall || u.x < W.wallX ? 1 : A.anchorAt(u.x, u.y);
+    const a = u.onWall || SDE(u) < 0 ? 1 : A.anchorAt(u.x, u.y);
     const spd = u.card.speed * (0.7 + 0.3 * a) * (mul || 1);
     return moveEnt(u, x, y, spd, dt);
   }
@@ -521,14 +548,14 @@ window.AOT = window.AOT || {};
     const c = u.card;
     let best = null, bs = -1;
     for (const t of G.titans) {
-      if (t.dead || t.x > W.deployMaxX + 350) continue;
+      if (t.dead || SDE(t) > A.DEPLOY_OUT + 250) continue;
       const dU = A.dist(u, t), dP = A.distXY(u.post.x, u.post.y, t.x, t.y);
       if (dU > c.sense && dP > c.leash) continue;
       if (dP > c.leash * 1.3 + 40) continue;
       if (t.def.steam && t.steamOn) continue;
       if (t.armor > 0.5 && c.ability !== 'spin' && c.ability !== 'shifter') continue; // лезвия против брони бесполезны
       let s = (Math.sqrt(t.def.pts) + 1) / (dU + 80);
-      if (t.x < GATE_X() + 260) s *= 1.8;
+      if (SDE(t) < 260) s *= 1.8;
       if (t.atWall) s *= 1.5;
       switch (c.ability) {
         case 'spin': if (t.def.special) s *= 3; break;
@@ -629,9 +656,9 @@ window.AOT = window.AOT || {};
     let best = null, bd = 1e9;
     for (const t of G.titans) {
       if (t.dead) continue;
-      const dx = t.x - GATE_X();
-      if (dx > c.range || Math.abs(t.y - u.y) > 320) continue;
-      const s = dx + Math.abs(t.y - u.y) * 0.5 - (t.atWall ? 200 : 0);
+      const sdT = SDE(t), du = A.dist(t, u);
+      if (sdT > c.range || du > c.range + 160) continue;
+      const s = sdT + du * 0.5 - (t.atWall ? 200 : 0);
       if (s < bd) { bd = s; best = t; }
     }
     if (!best) { u.atkT = 0.5; u.thought = 'Ждёт цель в секторе обстрела'; return; }
@@ -640,10 +667,12 @@ window.AOT = window.AOT || {};
     const crew = u.members / u.maxMembers;
     const dmg = c.dmg * (pyx ? 1.4 : 1) * (0.4 + 0.6 * crew);
     const lead = best.def.speed * 0.6;
-    const tx = best.x - lead, ty = best.y;
-    const sx = GATE_X() + 2, sy = u.y;
+    const bn = A.roseNormal(best.x, best.y);
+    const tx = best.x - bn.x * lead, ty = best.y - bn.y * lead;
+    const mp = A.wallPoint(u.x, u.y, HALF() - 2);
+    const sx = mp.x, sy = mp.y;
     A.puff(sx, sy, 8, { n: 4, col: ['#d8d8d8', '#b0b0b0'], spd: 10, up: 6, life: 0.9, size: 2, grow: 3 });
-    A.puff(sx + 3, sy, 8, { n: 3, col: ['#ffd25a', '#ff9a3a'], spd: 20, up: 2, life: 0.15, size: 1, grow: 1 });
+    A.puff(sx + mp.nx * 3, sy + mp.ny * 3, 8, { n: 3, col: ['#ffd25a', '#ff9a3a'], spd: 20, up: 2, life: 0.15, size: 1, grow: 1 });
     u.thought = `Огонь по: ${best.def.name}`;
     G.projs.push({
       kind: 'ball', x0: sx, y0: sy, z0: 10, x1: tx, y1: ty, t: 0, dur: 0.75, arc: 30,
@@ -659,7 +688,7 @@ window.AOT = window.AOT || {};
     if (u.abilT > 0) return;
     u.abilT = 9;
     const crews = G.units.filter((o) => A.unitAlive(o) && o.onWall && o.card.cannon);
-    const targets = G.titans.some((t) => !t.dead && t.x - GATE_X() < 520);
+    const targets = G.titans.some((t) => !t.dead && SDE(t) < 400);
     if (crews.length >= 2 && targets) {
       crews.forEach((o) => { o.atkT = Math.min(o.atkT, A.rand(0, 0.25)); });
       A.float(u.x, u.y - 16, 'Залп!', '#ffd45a');
@@ -772,13 +801,12 @@ window.AOT = window.AOT || {};
       return;
     }
     if (u.state === 'exhausted') {
-      const s = nearestSupply(u.x, u.y);
-      const target = u.x > GATE_X() ? { x: GATE_X() - 10, y: W.gateY } : s;
-      if (moveEnt(u, target.x, target.y, 34, dt) && u.x <= GATE_X()) {
-        if (A.distXY(u.x, u.y, s.x, s.y) < 4 || u.x < W.wallX) {
-          u.state = 'safe'; G.erenRest = true;
-          A.log('Эрен Йегер', 'Доставлен за стену. Восстановится к следующей волне.', 'info');
-        }
+      // ползёт к ближайшей стене — оттуда его поднимут на тросах
+      const wp = A.wallPoint(u.x, u.y, HALF() + 4);
+      u.thought = 'Истощён, ползёт к стене';
+      if (SDE(u) <= HALF() + 6 || moveEnt(u, wp.x, wp.y, 34, dt)) {
+        u.state = 'safe'; G.erenRest = true;
+        A.log('Эрен Йегер', 'Его подняли на стену. Восстановится к следующей волне.', 'info');
       }
       return;
     }
@@ -798,7 +826,7 @@ window.AOT = window.AOT || {};
         if (t.dead) continue;
         const dP = A.distXY(u.post.x, u.post.y, t.x, t.y);
         if (dP > c.leash) continue;
-        let s = (t.def.size + (t.x < GATE_X() + 250 ? 2 : 0)) / (A.dist(u, t) + 60);
+        let s = (t.def.size + (SDE(t) < 250 ? 2 : 0)) / (A.dist(u, t) + 60);
         if (t.def.steam && t.steamOn) s *= 0.1;
         if (s > bs) { bs = s; best = t; }
       }
@@ -820,21 +848,21 @@ window.AOT = window.AOT || {};
   }
   function erenSeal(u, dt) {
     const o = u.order;
-    const B = A.BOULDER;
-    const gateIn = { x: GATE_X() + 14, y: W.gateY };
-    u.thought = 'Несёт валун к воротам';
-    if (o.step === 0) { // к воротам снаружи
-      if (u.x < W.wallX) o.step = 1;
-      else if (moveEnt(u, gateIn.x, gateIn.y, 40, dt)) o.step = 1;
-    } else if (o.step === 1) { // внутрь к валуну
+    if (o.district == null) o.district = G.lastHit != null ? G.lastHit : A.nearestDistrict(u.x, u.y).idx;
+    const D = A.DISTRICTS[o.district], B = A.BOULDERS[o.district];
+    const gateOut = { x: D.gx + D.nx * 16, y: D.gy + D.ny * 16 }, gateIn = { x: D.gx - D.nx * 22, y: D.gy - D.ny * 22 };
+    u.thought = `Несёт валун к воротам района ${D.name}`;
+    if (o.step === 0) { // к воротам района снаружи
+      if (SDE(u) < 0 || moveEnt(u, gateOut.x, gateOut.y, 40, dt)) o.step = 1;
+    } else if (o.step === 1) { // внутрь, к валуну
       if (moveEnt(u, B.x + 14, B.y + 4, 40, dt)) { o.step = 2; u.carry = true; A.dust(B.x, B.y, 1); }
-    } else if (o.step === 2) { // обратно к пролому
-      if (moveEnt(u, W.wallX - 14, W.gateY, 28, dt)) {
-        G.sealed = true; u.carry = false;
+    } else if (o.step === 2) { // в проём ворот
+      if (moveEnt(u, gateIn.x, gateIn.y, 28, dt)) {
+        G.sealed = true; G.sealedAt = o.district; u.carry = false;
         G.wallHp = Math.min(G.wallMax, G.wallHp + G.wallMax * 0.4);
-        A.dust(W.wallX, W.gateY, 3); G.shake = 1;
-        A.log('Эрен Йегер', 'Валун вбит в пролом! Стена восстановлена на 40%.', 'kill');
-        A.float(W.wallX, W.gateY - 40, 'ПРОЛОМ ЗАКРЫТ', '#9fffb0', true);
+        A.dust(D.gx, D.gy, 3); G.shake = 1;
+        A.log('Эрен Йегер', `Валун вбит в ворота района ${D.name}! Стена восстановлена на 40%.`, 'kill');
+        A.float(D.gx, D.gy - 40, 'ПРОЛОМ ЗАКРЫТ', '#9fffb0', true);
         u.order = null; erenEmerge(u, 'выложился до конца');
       }
     }
@@ -848,8 +876,14 @@ window.AOT = window.AOT || {};
     if (u.punch > 0) u.punch -= dt;
     const c = u.card;
     if (c.ability === 'shifter') return updateEren(u, dt);
-    if (c.wallOnly) return updatePyxis(u, dt);
-    if (u.onWall && c.cannon && u.state !== 'deploy') return updateCannon(u, dt);
+    if (c.wallOnly || (u.onWall && c.cannon)) {
+      if (A.distXY(u.x, u.y, u.post.x, u.post.y) > 4) { // перебегает на новую позицию
+        u.z = A.lerp(u.z, 3, dt * 2); moveUnit(u, u.post.x, u.post.y, dt, 1.2);
+        u.thought = 'Перебирается на новую позицию'; return;
+      }
+      u.z = 0; if (u.state === 'deploy' || u.state === 'return') u.state = 'idle';
+      return c.wallOnly ? updatePyxis(u, dt) : updateCannon(u, dt);
+    }
 
     if (u.order && u.order.exp && G.t > u.order.exp) { u.order = null; u.state = 'return'; }
     if (u.order && A.handleOrder && A.handleOrder(u, dt)) { abilityTick(u, dt); return; }
@@ -952,7 +986,7 @@ window.AOT = window.AOT || {};
     if (G.phase !== 'prep') return;
     G.wave++;
     G.phase = 'wave';
-    G.queue = G.nextQueue || A.buildWave(G.wave);
+    G.queue = G.nextQueue || prepQueue(G.wave);
     G.nextQueue = null;
     G.waveT = 0;
     G.hpMul = A.waveHpMul(G.wave);
@@ -969,8 +1003,18 @@ window.AOT = window.AOT || {};
     const counts = {};
     G.queue.forEach((q) => { counts[q.type] = (counts[q.type] || 0) + 1; });
     const specials = Object.keys(counts).filter((k) => A.TITANS[k].special).map((k) => A.TITANS[k].name);
-    A.log('Дозор', `Волна ${G.wave}: к стене идут ${G.queue.length} титанов.` + (specials.length ? ` Среди них: ${specials.join(', ')}!` : ''), specials.length ? 'warn' : 'info');
+    const where = G.queue.dirs.map((i) => `${A.DISTRICTS[i].name} (${A.DISTRICTS[i].dir})`).join(', ');
+    A.log('Дозор', `Волна ${G.wave}: ${G.queue.length} титанов идут на район ${where}.` + (specials.length ? ` Среди них: ${specials.join(', ')}!` : ''), specials.length ? 'warn' : 'info');
+    if (A.onWaveStart) A.onWaveStart(G.queue.dirs);
   };
+
+  function prepQueue(n) {
+    const q = A.buildWave(n), dirs = A.waveDirs(n);
+    q.forEach((it) => { it.dir = A.TITANS[it.type].special ? dirs[0] : A.pick(dirs); });
+    q.dirs = dirs;
+    return q;
+  }
+  A.prepQueue = prepQueue;
 
   function waveClear() {
     G.phase = 'prep';
@@ -993,9 +1037,12 @@ window.AOT = window.AOT || {};
 
   // разведка заранее сообщает о шифтерах в следующей волне
   A.intel = function () {
-    const next = A.buildWave(G.wave + 1);
+    const next = prepQueue(G.wave + 1);
     G.nextQueue = next;
     const sp = [...new Set(next.filter((q) => A.TITANS[q.type].special).map((q) => q.type))];
+    const where = next.dirs.map((i) => `${A.DISTRICTS[i].name} (${A.DISTRICTS[i].dir})`).join(', ');
+    A.log('Разведка', `Следующая волна пойдёт на район ${where}. Готовьте оборону там.`, 'warn');
+    if (A.erwinRedeploy) A.erwinRedeploy(next.dirs, true);
     if (!sp.length) return;
     const tips = {
       armored: 'Бронированный: лезвия бесполезны. Нужны громовые копья (Эрвин, Ханджи), Эрен или много пушек.',
@@ -1032,7 +1079,7 @@ window.AOT = window.AOT || {};
       if (G.prepT <= 0) A.startWave();
     } else if (G.phase === 'wave') {
       G.waveT += dt;
-      while (G.queue.length && G.queue[0].t <= G.waveT) A.spawnTitan(G.queue.shift().type);
+      while (G.queue.length && G.queue[0].t <= G.waveT) { const q = G.queue.shift(); A.spawnTitan(q.type, { district: q.dir }); }
       if (!G.queue.length && !G.titans.some((t) => !t.dead)) waveClear();
     }
 

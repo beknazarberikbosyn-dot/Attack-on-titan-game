@@ -4,8 +4,8 @@ window.AOT = window.AOT || {};
   'use strict';
   const W = A.WORLD, G = A.G;
 
-  A.cam = { x: W.wallX - 420, y: W.gateY - 260, z: 1.5 };
-  A.ZOOMS = [0.4, 0.55, 0.75, 1, 1.5, 2, 3, 4, 6];
+  A.cam = { x: 1500, y: 2700, z: 1.5 };
+  A.ZOOMS = [0.17, 0.22, 0.3, 0.4, 0.55, 0.75, 1, 1.5, 2, 3, 4, 6];
   A.view = { cw: 800, ch: 600, dpr: 1 };
   A.mouse = { x: 0, y: 0, wx: 0, wy: 0, inside: false };
 
@@ -100,8 +100,11 @@ window.AOT = window.AOT || {};
     ctx.drawImage(A.bg, vx0, vy0, vx1 - vx0, vy1 - vy0, vx0, vy0, vx1 - vx0, vy1 - vy0);
 
     drawDecor(ctx, time, inView);
-    if (A.ui && A.ui.deployCard) drawDeployZone(ctx, vy0, vy1);
-    if (G.sealed) { ell(ctx, W.wallX - 10, W.gateY + 6, 20, 6, 'rgba(0,0,0,0.3)'); ell(ctx, W.wallX - 14, W.gateY - 8, 17, 14, '#8a857c'); ell(ctx, W.wallX - 18, W.gateY - 12, 8, 6, '#a29c92'); }
+    if (A.ui && A.ui.deployCard) drawDeployZone(ctx);
+    if (G.sealed) {
+      const D = A.DISTRICTS[G.sealedAt || 0], bx = D.gx - D.nx * 4, by = D.gy - D.ny * 4;
+      ell(ctx, bx + 4, by + 8, 20, 6, 'rgba(0,0,0,0.3)'); ell(ctx, bx, by - 4, 18, 15, '#8a857c'); ell(ctx, bx - 4, by - 9, 8, 6, '#a29c92');
+    }
 
     // ---- сущности по глубине ----
     const ents = [];
@@ -126,13 +129,9 @@ window.AOT = window.AOT || {};
       ctx.drawImage(cl.cv, x, cl.y, 320, 176);
     }
     ctx.globalAlpha = 1;
-    // дымка на горизонте
-    const mg = ctx.createLinearGradient(2780, 0, W.W, 0);
-    mg.addColorStop(0, 'rgba(225,228,220,0)'); mg.addColorStop(1, 'rgba(225,228,220,0.55)');
-    ctx.fillStyle = mg; ctx.fillRect(2780, vy0, W.W - 2780, vy1 - vy0);
-
     // ---- экранный слой (подписи) ----
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawMapLabels(ctx);
     drawLabels(ctx, ents);
     drawFloaters(ctx);
     if (A.ui && A.ui.deployCard) drawGhost(ctx);
@@ -155,19 +154,22 @@ window.AOT = window.AOT || {};
     }
     // жители
     const panic = G.titans && G.titans.some((t) => !t.dead && t.atWall);
-    for (const p of D.people) {
-      const L = p.horiz ? W.wallX - 120 : W.H - 20;
-      const sp = p.v * (panic ? 2.2 : 1);
-      let pos = (p.p + sp * time) % (2 * L); if (pos < 0) pos += 2 * L;
-      const q = pos > L ? 2 * L - pos : pos;
-      const x = p.horiz ? q + 10 : p.line, y = p.horiz ? p.line : q + 10;
-      if (!inView(x, y)) continue;
+    if (A.cam.z >= 1) for (const p of D.people) {
+      const st = p.s;
+      if (!inView(st.x1, st.y1, 200) && !inView(st.x2, st.y2, 200)) continue;
+      let q = (p.p + p.v * time * (panic ? 2.2 : 1)) % 2; if (q < 0) q += 2;
+      const k = q > 1 ? 2 - q : q;
+      const L = Math.hypot(st.x2 - st.x1, st.y2 - st.y1) || 1;
+      const x = st.x1 + (st.x2 - st.x1) * k + (-(st.y2 - st.y1) / L) * p.off, y = st.y1 + (st.y2 - st.y1) * k + ((st.x2 - st.x1) / L) * p.off;
+      if (!inView(x, y) || (st.inside && !st.inside(x, y))) continue;
       c.fillStyle = p.col; c.fillRect(Math.round(x), Math.round(y) - 2, 1, 2);
       c.fillStyle = '#e0b898'; c.fillRect(Math.round(x), Math.round(y) - 3, 1, 1);
     }
     // мельница
-    const wm = D.windmill;
-    if (wm && inView(wm.x, wm.y, 30)) {
+    for (const wm of D.windmills) {
+      if (!inView(wm.x, wm.y, 30)) continue;
+      const [bx, by] = wm.base;
+      c.fillStyle = '#cfc4ae'; c.fillRect(bx - 5, by - 22, 10, 22); c.fillStyle = '#6c4a34'; c.fillRect(bx - 6, by - 26, 12, 5);
       const a0 = time * 0.7;
       c.fillStyle = '#5a3d24';
       for (let b = 0; b < 4; b++) {
@@ -179,6 +181,7 @@ window.AOT = window.AOT || {};
       }
       c.fillStyle = '#3a2a1a'; c.fillRect(wm.x - 1, wm.y - 1, 3, 3);
     }
+    // пушки на Стене Роза: дымок от выстрела рисуют частицы, тут — только расчёты нет
     // флаги
     for (const f of D.flags) {
       if (!inView(f.x, f.y, 10)) continue;
@@ -187,11 +190,14 @@ window.AOT = window.AOT || {};
       c.fillStyle = 'rgba(0,0,0,0.2)'; c.fillRect(f.x + 1, f.y + 3 + w, 6, 1);
     }
     // огни фонарей, когда титаны у стены — тревога
-    if (panic) { c.fillStyle = `rgba(255,80,40,${0.25 + Math.sin(time * 8) * 0.15})`; for (const l of D.lamps) if (inView(l.x, l.y)) c.fillRect(l.x - 1, l.y - 1, 3, 3); }
+    if (panic) {
+      c.fillStyle = `rgba(255,80,40,${0.35 + Math.sin(time * 8) * 0.2})`;
+      for (const Dd of A.DISTRICTS) if (inView(Dd.gx, Dd.gy, 40)) { c.fillRect(Math.round(Dd.gx) - 2, Math.round(Dd.gy) - 30, 4, 4); }
+    }
     // птицы
     c.fillStyle = '#2a2a26';
     for (let fl = 0; fl < 4; fl++) {
-      const bx = ((time * (14 + fl * 3) + fl * 900) % (W.W + 200)) - 100, by = 200 + fl * 300 + Math.sin(time * 0.4 + fl) * 40;
+      const bx = ((time * (14 + fl * 3) + fl * 900) % (W.W + 200)) - 100, by = 400 + fl * 800 + Math.sin(time * 0.4 + fl) * 40;
       for (let b = 0; b < 5; b++) {
         const x = Math.round(bx - b * 7 - (b % 2) * 3), y = Math.round(by + (b % 2) * 4 + b);
         if (!inView(x, y)) continue;
@@ -201,13 +207,14 @@ window.AOT = window.AOT || {};
     }
   }
 
-  function drawDeployZone(c, vy0, vy1) {
-    c.fillStyle = 'rgba(160,30,20,0.18)';
-    c.fillRect(W.deployMaxX, vy0, W.W - W.deployMaxX, vy1 - vy0);
-    c.fillStyle = 'rgba(255,90,60,0.6)';
-    for (let y = vy0; y < vy1; y += 6) c.fillRect(W.deployMaxX, y, 1, 3);
+  function drawDeployZone(c) {
+    c.drawImage(A.deployMask, 0, 0, A.deployMask.width, A.deployMask.height, 0, 0, A.deployMask.width * 8, A.deployMask.height * 8);
     const card = A.CARD[A.ui.deployCard];
-    if (card && card.wallOnly) { c.fillStyle = 'rgba(120,220,120,0.18)'; c.fillRect(W.wallX, vy0, W.wallW, vy1 - vy0); }
+    c.strokeStyle = card && card.wallOnly ? 'rgba(120,230,120,0.55)' : 'rgba(255,220,120,0.25)';
+    c.lineWidth = A.WALL_T.rose;
+    c.beginPath(); c.arc(A.C.x, A.C.y, A.R.rose, 0, Math.PI * 2); c.stroke();
+    for (const Dd of A.DISTRICTS) { c.beginPath(); c.arc(Dd.cx, Dd.cy, Dd.r, Dd.ang - 1.75, Dd.ang + 1.75); c.stroke(); }
+    c.lineWidth = 1;
   }
 
   function drawTitan(c, t, time) {
@@ -347,12 +354,37 @@ window.AOT = window.AOT || {};
     c.fillStyle = bg || 'rgba(0,0,0,0.65)'; c.fillRect(Math.round(x - w / 2) - 1, Math.round(y) - 1, w + 2, 5);
     c.fillStyle = col; c.fillRect(Math.round(x - w / 2), Math.round(y), Math.round(w * A.clamp(frac, 0, 1)), 3);
   }
-  function txt(c, s, x, y, col, size, align) {
-    c.font = `${size || 11}px "Pixelify Sans", monospace`;
+  function txt(c, s, x, y, col, size, align, bold) {
+    c.font = `${bold ? 700 : 600} ${size || 12}px "Rubik", system-ui, sans-serif`;
     c.textAlign = align || 'center'; c.textBaseline = 'bottom';
     c.lineWidth = 3; c.strokeStyle = 'rgba(10,10,10,0.9)'; c.strokeText(s, x, y);
     c.fillStyle = col; c.fillText(s, x, y);
   }
+  // названия мест: чем дальше камера, тем крупнее объекты подписаны
+  function drawMapLabels(c) {
+    const z = A.cam.z;
+    for (const l of A.decor.labels) {
+      let show, size;
+      if (l.size === 3) { show = z < 0.6; size = 20; }
+      else if (l.size === 2) { show = z < 1.6; size = z < 0.6 ? 14 : 16; }
+      else { show = z >= 0.4 && z < 3.2; size = 12; }
+      if (!show) continue;
+      const p = A.worldToScreen(l.x, l.y);
+      if (p.x < -200 || p.y < -50 || p.x > A.view.cw + 200 || p.y > A.view.ch + 50) continue;
+      txt(c, l.text, p.x, p.y, l.wall ? '#e8dcc0' : l.size === 3 ? '#ffe7a8' : '#fff2c8', size, 'center', l.size >= 2);
+      if (l.sub && z >= 0.4) txt(c, l.sub, p.x, p.y + 14, '#d8ccb0', 11);
+    }
+    // стрелки атаки
+    if (G.phase === 'wave' && G.queue && G.queue.dirs) {
+      const pulse = 0.6 + Math.sin(performance.now() / 200) * 0.4;
+      for (const i of G.queue.dirs) {
+        const Dd = A.DISTRICTS[i];
+        const p = A.worldToScreen(Dd.gx + Dd.nx * 260, Dd.gy + Dd.ny * 260);
+        c.globalAlpha = pulse; txt(c, '▼ ТИТАНЫ', p.x, p.y, '#ff6b5a', 14, 'center', true); c.globalAlpha = 1;
+      }
+    }
+  }
+
   function drawLabels(c, ents) {
     const z = A.cam.z;
     const hover = A.ui && A.ui.hover;
@@ -414,8 +446,7 @@ window.AOT = window.AOT || {};
     c.strokeStyle = can.ok ? 'rgba(140,240,140,0.7)' : 'rgba(255,90,70,0.8)';
     c.setLineDash([6, 4]); c.lineWidth = 2;
     c.beginPath();
-    if (card.cannon && can.onWall) c.rect(m.x, m.y - 320 * z, r, 640 * z);
-    else c.arc(m.x, m.y, r, 0, 7);
+    c.arc(m.x, m.y, r, 0, 7);
     c.stroke(); c.setLineDash([]);
     c.fillStyle = can.ok ? 'rgba(140,240,140,0.9)' : 'rgba(255,90,70,0.9)';
     c.fillRect(m.x - 3, m.y - 3, 6, 6);
@@ -443,7 +474,10 @@ window.AOT = window.AOT || {};
     }
     mc.strokeStyle = '#ffd45a'; mc.lineWidth = 1;
     mc.strokeRect(A.cam.x * kx + 0.5, A.cam.y * ky + 0.5, A.view.cw / A.cam.z * kx, A.view.ch / A.cam.z * ky);
-    mc.fillStyle = 'rgba(255,60,40,0.25)'; mc.fillRect(W.deployMaxX * kx, 0, 1, h);
+    if (G.phase === 'wave' && G.queue && G.queue.dirs) for (const i of G.queue.dirs) {
+      const Dd = A.DISTRICTS[i]; mc.fillStyle = '#ff3a2a';
+      mc.beginPath(); mc.arc((Dd.gx + Dd.nx * 200) * kx, (Dd.gy + Dd.ny * 200) * ky, 5, 0, 7); mc.fill();
+    }
   };
 
   A.pickAt = function (wx, wy) {

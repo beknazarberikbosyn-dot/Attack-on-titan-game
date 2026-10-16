@@ -15,7 +15,6 @@ window.AOT = window.AOT || {};
   };
 
   // ---------- Карточки ----------
-  const IMG_EXT = ['png', 'jpg', 'webp'];
   const cardEls = {};
   function initials(name) { return name.split(' ').filter((w) => w.length > 2).slice(0, 2).map((w) => w[0]).join(''); }
 
@@ -29,7 +28,7 @@ window.AOT = window.AOT || {};
       el.innerHTML = `
         <div class="card-art">
           <div class="card-fallback"><canvas width="44" height="40"></canvas><span>${initials(c.name)}</span></div>
-          <img alt="${c.name}">
+          <canvas class="portrait" width="48" height="40" hidden></canvas>
         </div>
         <div class="card-cost">${c.cost}</div>
         <div class="card-tier">${A.TIER_NAMES[c.tier]}</div>
@@ -39,11 +38,14 @@ window.AOT = window.AOT || {};
         <button class="px-btn tiny card-plus" title="Купить в резерв">+</button>`;
       const icon = c.cannon || c.ability === 'marshal' ? 'cannon' : c.tier >= 3 ? 'star' : 'blades';
       A.drawIcon(el.querySelector('canvas'), icon, c.tier >= 3 ? '#ffd45a' : '#dfe6ee', c.color);
-      // картинка карточки: assets/cards/<id>.png|jpg|jpeg|webp
-      const img = el.querySelector('img');
-      let k = 0;
-      img.onerror = () => { k++; if (k < IMG_EXT.length) img.src = `assets/cards/${c.id}.${IMG_EXT[k]}`; else img.remove(); };
-      img.src = `assets/cards/${c.id}.${IMG_EXT[0]}`;
+      // перетащи картинку на карточку — она станет пиксельным портретом
+      el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('drop'); });
+      el.addEventListener('dragleave', () => el.classList.remove('drop'));
+      el.addEventListener('drop', (e) => {
+        e.preventDefault(); el.classList.remove('drop');
+        const f = e.dataTransfer.files && e.dataTransfer.files[0];
+        A.uploadPortrait(c.id, f, (ok, why) => UI.toast(ok ? `Портрет «${c.name}» готов` : why));
+      });
 
       el.addEventListener('click', () => onCardClick(c.id));
       el.querySelector('.card-plus').addEventListener('click', (e) => {
@@ -62,17 +64,66 @@ window.AOT = window.AOT || {};
   function onCardClick(id) {
     const card = A.CARD[id];
     if (UI.deployCard === id) { UI.deployCard = null; refreshCards(); return; }
-    if (G.hand[id] > 0) { UI.deployCard = id; UI.relocating = null; refreshCards(); return; }
+    if (G.hand[id] > 0) { UI.deployCard = id; UI.relocating = null; select(null); refreshCards(); return; }
     if (card.kind === 'hero' && A.onField(id)) {
       const u = G.units.find((x) => A.unitAlive(x) && x.card.id === id);
       if (u) { select(u); A.centerOn(u.x, u.y); }
       return;
     }
     const r = A.buy(id);
-    if (!r.ok) { UI.toast(r.reason); return; }
-    UI.deployCard = id; UI.relocating = null;
+    if (!r.ok) { UI.toast(r.reason); showPreview(id, true); return; }
+    UI.deployCard = id; UI.relocating = null; select(null);
     refreshCards();
   }
+
+  // ---------- Большой портрет выбранной карточки ----------
+  let previewId = null, previewPinned = false;
+  function showPreview(id, pin) { previewId = id; previewPinned = !!pin; renderPreview(); }
+  function renderPreview() {
+    const box = $('#cardPreview');
+    const id = UI.deployCard || (previewPinned ? previewId : null);
+    if (!id || UI.selected) { box.hidden = true; return; }
+    const c = A.CARD[id];
+    if (box.dataset.id !== id) {
+      box.dataset.id = id;
+      box.style.setProperty('--tier', A.TIER_COLORS[c.tier]);
+      box.innerHTML = `<button class="px-btn tiny close" data-pv="close">×</button>
+        <div class="pv-art"><canvas width="192" height="160"></canvas><div class="pv-empty">Нет портрета.<br>Перетащи сюда картинку<br>или нажми «Загрузить»</div></div>
+        <h3>${c.name}</h3><div class="role">Уровень ${A.TIER_NAMES[c.tier]} · ${c.role}</div>
+        <div class="pv-state"></div>
+        <div class="desc">${c.desc}</div>
+        <div class="btns">
+          <label class="px-btn small">Загрузить портрет<input type="file" accept="image/*" hidden></label>
+          <button class="px-btn small ghost" data-pv="clear">Убрать</button>
+        </div>
+        <div class="pv-hint">Любая картинка станет пиксельной. Чтобы портрет видели все игроки — положи файл <b>assets/cards/${c.id}.png</b> в репозиторий.</div>`;
+      box.querySelector('[data-pv="close"]').onclick = () => { UI.deployCard = null; previewPinned = false; refreshCards(); };
+      box.querySelector('[data-pv="clear"]').onclick = () => A.clearPortrait(id);
+      box.querySelector('input').onchange = (e) => A.uploadPortrait(id, e.target.files[0], (ok, why) => UI.toast(ok ? 'Портрет готов' : why));
+      const art = box.querySelector('.pv-art');
+      art.ondragover = (e) => { e.preventDefault(); art.classList.add('drop'); };
+      art.ondragleave = () => art.classList.remove('drop');
+      art.ondrop = (e) => { e.preventDefault(); art.classList.remove('drop'); A.uploadPortrait(id, e.dataTransfer.files[0], (ok, why) => UI.toast(ok ? 'Портрет готов' : why)); };
+    }
+    const has = A.drawPortrait(box.querySelector('canvas'), id);
+    box.querySelector('.pv-empty').hidden = has;
+    box.querySelector('[data-pv="clear"]').hidden = !(A.portraits[id] && A.portraits[id].source === 'upload');
+    const st = box.querySelector('.pv-state');
+    const txt = G.hand[id] > 0 ? `В резерве: ${G.hand[id]} — кликни по карте, чтобы высадить` : A.canBuy(id).ok ? `Цена: ${c.cost} баллов` : `Цена: ${c.cost} баллов · ${A.canBuy(id).reason}`;
+    if (st.textContent !== txt) st.textContent = txt;
+    box.hidden = false;
+  }
+  A.onPortrait((id) => {
+    const el = cardEls[id];
+    if (el) {
+      const cv = el.querySelector('canvas.portrait');
+      const has = A.drawPortrait(cv, id);
+      cv.hidden = !has; el.querySelector('.card-fallback').hidden = has;
+    }
+    const pb = $('#cardPreview'); if (pb) pb.dataset.id = '';
+    renderPreview();
+    if (UI.selected && UI.selected.card && UI.selected.card.id === id) select(UI.selected);
+  });
 
   function refreshCards() {
     for (const c of A.CARDS) {
@@ -88,6 +139,7 @@ window.AOT = window.AOT || {};
       el.querySelector('.card-plus').disabled = !can;
     }
     $('#game').classList.toggle('deploying', !!UI.deployCard || !!UI.relocating);
+    renderPreview();
   }
   UI.refreshCards = refreshCards;
 
@@ -148,7 +200,8 @@ window.AOT = window.AOT || {};
     } else {
       const c = e.card;
       p.innerHTML = `<button class="px-btn tiny close" data-a="close">×</button>
-        <h3>${c.name}</h3><div class="role">${c.role} · уровень ${A.TIER_NAMES[c.tier]}</div>
+        <div class="p-head"><canvas class="p-portrait" width="96" height="80"></canvas>
+        <div><h3>${c.name}</h3><div class="role">${c.role} · уровень ${A.TIER_NAMES[c.tier]}</div></div></div>
         <div class="row"><span>Состояние</span><b id="pSt"></b></div>
         <div class="row"><span>${c.kind === 'squad' ? 'Бойцов' : c.ability === 'shifter' ? 'Титан' : 'Здоровье'}</span><b id="pHp"></b></div>
         <div class="row" id="pGasRow"><span>Газ УПМ</span><b id="pGas"></b></div>
@@ -165,6 +218,9 @@ window.AOT = window.AOT || {};
         <div class="desc">${c.desc}</div>`;
     }
     p.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', () => panelAction(b.dataset.a)));
+    const pc = p.querySelector('.p-portrait');
+    if (pc && !A.drawPortrait(pc, e.card.id)) pc.remove();
+    renderPreview();
     updatePanel();
   }
   UI.select = select;
@@ -177,7 +233,8 @@ window.AOT = window.AOT || {};
     if (a === 'reinf') { if (!A.reinforce(e)) UI.toast('Не хватает баллов или отряд полный'); return; }
     if (a === 'move') { UI.relocating = e; UI.deployCard = null; refreshCards(); UI.toast('Кликни по карте — новая позиция'); return; }
     if (a === 'wall') {
-      const r = A.relocate(e, W.wallX + W.wallW + 50, A.clamp(e.y, 40, W.H - 40));
+      const wp = A.wallPoint(e.x, e.y, A.WALL_T.rose / 2 + 50);
+      const r = A.relocate(e, wp.x, wp.y);
       if (!r.ok) UI.toast(r.reason);
     }
   }
@@ -327,6 +384,14 @@ window.AOT = window.AOT || {};
     $('#zoomIn').onclick = () => A.zoomAt(A.view.cw / 2, A.view.ch / 2, 1);
     $('#zoomOut').onclick = () => A.zoomAt(A.view.cw / 2, A.view.ch / 2, -1);
 
+    document.querySelectorAll('[data-army]').forEach((b) => {
+      b.onclick = () => {
+        const i = +b.dataset.army, moved = A.moveArmyTo([i]);
+        const n = Object.values(moved).reduce((a, c) => a + c, 0);
+        UI.toast(n ? `${n} отрядов идут к району ${A.DISTRICTS[i].name}` : `Все уже у района ${A.DISTRICTS[i].name}`);
+        A.centerOn(A.DISTRICTS[i].gx, A.DISTRICTS[i].gy);
+      };
+    });
     $('#btnStart').onclick = () => A.startWave();
     $('#btnPause').onclick = () => { G.paused = !G.paused; };
     $('#btnSpeed').onclick = cycleSpeed;
@@ -349,9 +414,18 @@ window.AOT = window.AOT || {};
   }
   A.onGameOver = () => setTimeout(showOver, 1200);
 
+  // новая волна с другого направления — показать, куда идут титаны
+  A.onWaveStart = function (dirs) {
+    const D = A.DISTRICTS[dirs[0]];
+    const p = A.screenToWorld(A.view.cw / 2, A.view.ch / 2);
+    if (Math.hypot(p.x - D.gx, p.y - D.gy) > 500) { A.cam.z = Math.min(A.cam.z, 1); A.centerOn(D.gx + D.nx * 160, D.gy + D.ny * 160); }
+    UI.toast(`Титаны идут на ${dirs.map((i) => A.DISTRICTS[i].name).join(' и ')}!`);
+  };
+
   UI.init = function () {
     logBox = $('#logList');
     buildCards();
+    A.loadPortraits();
     initInput();
     try { const b = +localStorage.getItem('aot_best_wave') || 0; if (b) $('#bestWave').textContent = `Рекорд: волна ${b}`; } catch (e) { /* нет хранилища */ }
     $('#btnPlay').onclick = () => {
@@ -361,7 +435,7 @@ window.AOT = window.AOT || {};
     $('#btnRestart').onclick = () => {
       A.newGame(); logBox.innerHTML = ''; G.log.forEach(A.onLog);
       UI.deployCard = null; select(null); speedIdx = 0;
-      A.cam.z = 1.5; A.centerOn(W.wallX + 160, W.gateY);
+      A.cam.z = 1.5; A.centerOn(A.DISTRICTS[0].gx, A.DISTRICTS[0].gy + 60);
       $('#overlay').classList.add('hidden');
       A.started = true;
     };

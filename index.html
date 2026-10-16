@@ -7,7 +7,7 @@
   <meta name="description" content="Пиксельная стратегия-оборона по мотивам «Атаки титанов»: защищай Стену Роза карточками солдат.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -52,9 +52,15 @@
     </aside>
 
     <section id="panel" hidden></section>
+    <section id="cardPreview" hidden></section>
 
     <div id="minimapWrap">
-      <canvas id="minimap" width="320" height="140"></canvas>
+      <canvas id="minimap" width="300" height="285"></canvas>
+      <div class="army" title="Перебросить всех бойцов (кроме Эрена) к району">
+        <span>Переброска:</span>
+        <button class="px-btn tiny ghost" data-army="0">Трост</button><button class="px-btn tiny ghost" data-army="1">Каранес</button>
+        <button class="px-btn tiny ghost" data-army="2">Ялкелл</button><button class="px-btn tiny ghost" data-army="3">Кролва</button>
+      </div>
       <div class="zoom">
         <button class="px-btn tiny" id="zoomIn">+</button>
         <button class="px-btn tiny" id="zoomOut">−</button>
@@ -79,10 +85,12 @@
         <div class="rules">
           <p>Титаны волнами идут с востока к <b>Стене Роза</b>. Если её прочность упадёт до нуля — город падёт.</p>
           <ul>
+            <li>Перед тобой весь остров Парадиз. Стена Мария уже пала — титаны идут из её земель на районы Стены Розы: <b>Трост</b> (юг), <b>Каранес</b> (восток), <b>Ялкелл</b> (север), <b>Кролва</b> (запад). Разведка заранее говорит, куда ударит следующая волна.</li>
             <li>Покупай <b>карточки</b> за баллы (на старте — 50) и высаживай бойцов кликом по карте.</li>
             <li>Баллы дают за убитых титанов: малый — 2, обычный — 3, девиант — 5 … Колоссальный — 100.</li>
             <li><b>Гарнизон на стене</b> стреляет из пушек. <b>Разведкорпус</b> режет загривки — в лесу и городе сильнее, в поле слабее.</li>
             <li>Газ кончается — бойцы сами летят к складам у стены.</li>
+            <li>Портреты: перетащи любую картинку на карточку — она станет пиксельной.</li>
             <li>Каждый герой думает по-своему. А <b>Эрвин</b> командует всем полем: тратит громовые копья только там, где без них никак, ведёт кавалерию, вводит Леви из резерва.</li>
           </ul>
           <p class="keys">Колесо — зум · перетаскивание — обзор · WASD/стрелки · Пробел — пауза · F — скорость · Esc — отмена</p>
@@ -104,6 +112,7 @@
   <script src="js/data.js"></script>
   <script src="js/world.js"></script>
   <script src="js/sprites.js"></script>
+  <script src="js/portraits.js"></script>
   <script src="js/game.js"></script>
   <script src="js/command.js"></script>
   <script src="js/render.js"></script>

@@ -6,7 +6,8 @@ window.AOT = window.AOT || {};
 (function (A) {
   'use strict';
   const W = A.WORLD, G = A.G;
-  const GATE_X = () => W.wallX + W.wallW;
+  const SDE = (e) => A.sdRose(e.x, e.y);
+  const HALF = () => A.WALL_T.rose / 2;
   const I = () => A._internal;
 
   const alive = (u) => A.unitAlive(u);
@@ -132,11 +133,11 @@ window.AOT = window.AOT || {};
     const ordersOn = (t) => G.units.filter((u) => alive(u) && u.order && u.order.kind === 'spear' && u.order.target === t).length;
     const cands = [];
     for (const t of liveT) {
-      if (t.x > GATE_X() + 1150) continue;
+      if (SDE(t) > 700) continue;
       if (t.type === 'armored' && t.armor > 0) cands.push({ t, prio: 100 + (t.charging ? 60 : 0) + (t.atWall ? 40 : 0), need: t.armor > 0.45 ? 2 : 1, why: 'armored' });
-      else if (t.type === 'colossal' && !t.steamOn && t.x < GATE_X() + 700) cands.push({ t, prio: 85, need: 2, why: 'colossal' });
+      else if (t.type === 'colossal' && !t.steamOn && SDE(t) < 450) cands.push({ t, prio: 85, need: 2, why: 'colossal' });
       else if (t.type === 'female' && (t.hardenT > 0 || t.rootT > 0) && free > reserve + 1 && G.t > (t.spearOkT || 0)) cands.push({ t, prio: 60, need: 1, why: 'female', cd: 9 });
-      else if (t.type === 'jaw' && free > reserve + 2 && t.x < GATE_X() + 500 && G.t > (t.spearOkT || 0)) cands.push({ t, prio: 40, need: 1, why: 'jaw', cd: 12 });
+      else if (t.type === 'jaw' && free > reserve + 2 && SDE(t) < 350 && G.t > (t.spearOkT || 0)) cands.push({ t, prio: 40, need: 1, why: 'jaw', cd: 12 });
     }
     cands.sort((a, b) => b.prio - a.prio);
     for (const c of cands) {
@@ -159,7 +160,7 @@ window.AOT = window.AOT || {};
       }
     }
     // показать, что он НЕ тратит копья впустую
-    const crowd = liveT.filter((t) => !t.def.special && t.x < GATE_X() + 400).length;
+    const crowd = liveT.filter((t) => !t.def.special && SDE(t) < 300).length;
     if (crowd >= 5 && !cands.length && G.spears > 0 && (D.cd.save || 0) <= 0) {
       D.cd.save = 70;
       say(`«Копья по обычным титанам не тратим — их ${G.spears}, и каждое понадобится против брони. С мелочью справятся клинки и пушки.»`, null);
@@ -170,19 +171,21 @@ window.AOT = window.AOT || {};
     const D = G.dir;
     const beast = liveT.find((t) => t.type === 'beast' && !t.retreating);
     if (!beast || (D.cd.beast || 0) > 0) return;
-    const atHold = beast.x <= GATE_X() + beast.def.holdOffset + 40;
+    const atHold = SDE(beast) <= beast.def.holdSd + 40;
     if (!atHold || beast.disarmT > 0 || beast.distractT > 0) return;
     const recent = G.rockHits.reduce((s, r) => s + r.n, 0);
-    const exposed = G.units.filter((u) => alive(u) && A.dist(u, beast) < beast.def.throwRange && u.x > W.wallX - 60).length;
+    const exposed = G.units.filter((u) => alive(u) && A.dist(u, beast) < beast.def.throwRange && SDE(u) > -60).length;
     if (recent < 2 && exposed < 3) return;
     D.cd.beast = 30;
 
     const levi = G.units.find((u) => alive(u) && isId(u, 'levi'));
     const cavalry = G.units.filter((u) => alive(u) && u.card.kind === 'squad' && u.card.faction === 'survey' && !u.order);
     const soldiers = cavalry.reduce((s, u) => s + u.members, 0);
-    const side = beast.y > W.gateY ? 1 : -1;
-    const fy = A.clamp(beast.y + side * 330, 60, W.H - 60);
-    const wp = [{ x: beast.x - 320, y: fy }, { x: beast.x + 60, y: fy }];
+    // обход: вдоль стены в сторону, потом заход сбоку-сзади
+    const bn = A.roseNormal(beast.x, beast.y), tx = -bn.y, ty = bn.x;
+    const side = A.chance(0.5) ? 1 : -1;
+    const fx = beast.x + tx * side * 330 - bn.x * 160, fy = beast.y + ty * side * 330 - bn.y * 160;
+    const wp = [{ x: fx, y: fy }, { x: beast.x + tx * side * 70 + bn.x * 60, y: beast.y + ty * side * 70 + bn.y * 60 }];
 
     const sendCharge = (exp, note) => {
       const chargers = cavalry.slice();
@@ -196,15 +199,14 @@ window.AOT = window.AOT || {};
       levi.target = null;
       if (soldiers >= 4) {
         sendCharge(9, false);
-        say(`«Звероподобный бьёт по нам камнями (потерь: ${recent}). Отряды — ложная атака в лоб, отвлеките его. Леви — в обход через ${side > 0 ? 'южный' : 'северный'} фланг, руби руки!»`, erwin);
+        say(`«Звероподобный бьёт по нам камнями (потерь: ${recent}). Отряды — ложная атака в лоб, отвлеките его. Леви — в обход с фланга, руби руки!»`, erwin);
       } else {
         say(`«Звероподобный обстреливает поле. Леви, обходи его с фланга — он не успеет развернуться к тебе!»`, erwin);
       }
       return;
     }
     if (G.hand.levi > 0) {
-      const px = A.clamp(beast.x - 320, GATE_X() + 60, W.deployMaxX - 10);
-      const res = A.deploy('levi', px, fy, true);
+      const res = A.deploy('levi', fx, fy, true);
       if (res.ok) {
         res.unit.order = { kind: 'flank', target: beast, wp, i: 0, exp: G.t + 70 };
         say('«Леви — из резерва в бой. Только он доберётся до Звероподобного живым. Обходи с фланга!»', erwin);
@@ -219,9 +221,10 @@ window.AOT = window.AOT || {};
     // отход за стену
     let moved = 0;
     for (const u of G.units) {
-      if (!alive(u) || u.onWall || u.x < W.wallX || u.card.ability === 'shifter') continue;
+      if (!alive(u) || u.onWall || SDE(u) < 0 || u.card.ability === 'shifter') continue;
       if (A.dist(u, beast) > beast.def.throwRange) continue;
-      u.order = { kind: 'fallback', x: W.wallX - 90, y: A.clamp(u.y, 60, W.H - 60), exp: G.t + 22, why: 'Укрывается от камнепада за стеной' };
+      const ip = A.wallPoint(u.x, u.y, -HALF() - 70);
+      u.order = { kind: 'fallback', x: ip.x, y: ip.y, exp: G.t + 22, why: 'Укрывается от камнепада за стеной' };
       moved++;
     }
     if (moved) say(`«Людей для атаки мало — не будем отдавать их камням. Все ${moved} звеньев — за стену! Пусть работают пушки.»`, erwin);
@@ -230,14 +233,16 @@ window.AOT = window.AOT || {};
   function colossalPlan(erwin, liveT) {
     const D = G.dir;
     const col = liveT.find((t) => t.type === 'colossal');
-    if (!col || col.x > GATE_X() + 700) return;
+    if (!col || SDE(col) > 450) return;
     if (col.steamOn && (D.cd.colSteam || 0) <= 0) {
       const near = G.units.filter((u) => alive(u) && A.reachable(u) && A.dist(u, col) < 200 && u.card.ability !== 'shifter');
       if (near.length) {
         D.cd.colSteam = 14;
         near.forEach((u) => {
           const dx = u.x - col.x, dy = u.y - col.y, d = Math.hypot(dx, dy) || 1;
-          u.order = { kind: 'fallback', x: A.clamp(col.x + dx / d * 240, GATE_X() + 30, W.deployMaxX), y: A.clamp(col.y + dy / d * 240, 40, W.H - 40), exp: G.t + Math.max(3, col.steamT), why: 'Ждёт, пока иссякнет пар' };
+          let fx = col.x + dx / d * 240, fy = col.y + dy / d * 240;
+          if (A.sdRose(fx, fy) < HALF() + 20) { const p = A.wallPoint(fx, fy, HALF() + 25); fx = p.x; fy = p.y; }
+          u.order = { kind: 'fallback', x: fx, y: fy, exp: G.t + Math.max(3, col.steamT), why: 'Ждёт, пока иссякнет пар' };
         });
         say(`«Пар! ${near.length} звеньев — отойти от Колоссального. Ждём: он сжигает сам себя.»`, erwin);
       }
@@ -256,7 +261,7 @@ window.AOT = window.AOT || {};
   function femalePlan(erwin, liveT) {
     const D = G.dir;
     const fem = liveT.find((t) => t.type === 'female');
-    if (!fem || (D.cd.trap || 0) > 0 || fem.x > GATE_X() + 900) return;
+    if (!fem || (D.cd.trap || 0) > 0 || SDE(fem) > 600) return;
     const squads = G.units.filter((u) => alive(u) && A.reachable(u) && u.card.kind === 'squad' && A.dist(u, fem) < 360);
     if (squads.length < 2) return;
     D.cd.trap = 32;
@@ -269,14 +274,15 @@ window.AOT = window.AOT || {};
   function swarmPlan(erwin, liveT) {
     const D = G.dir;
     if ((D.cd.swarm || 0) > 0) return;
-    const near = liveT.filter((t) => t.x < GATE_X() + 380 && !t.def.special).length;
+    const near = liveT.filter((t) => SDE(t) < 280 && !t.def.special).length;
     if (near < 7) return;
     D.cd.swarm = 25;
     let moved = 0;
     for (const u of G.units) {
       if (!alive(u) || !A.reachable(u) || u.card.kind !== 'squad' || u.order) continue;
       if (A.anchorAt(u.x, u.y) > 0.8) continue;
-      u.order = { kind: 'fallback', x: GATE_X() + 60, y: A.clamp(u.y, W.gateY - 220, W.gateY + 220), exp: G.t + 16, why: 'Перестраивается к стене — там есть опоры' };
+      const op = A.wallPoint(u.x, u.y, HALF() + 55);
+      u.order = { kind: 'fallback', x: op.x, y: op.y, exp: G.t + 16, why: 'Перестраивается к стене — там есть опоры' };
       moved++;
     }
     G.units.forEach((u) => { if (alive(u) && u.onWall && u.card.cannon) u.atkT = Math.min(u.atkT, A.rand(0, 0.4)); });
@@ -291,14 +297,15 @@ window.AOT = window.AOT || {};
       eren.order = { kind: 'seal', step: 0 }; D.cd.seal = 999;
       say('«Эрен — валун в пролом! Все остальные — прикрывать его любой ценой!»', erwin);
     } else if (!eren && G.hand.eren > 0) {
-      const res = A.deploy('eren', GATE_X() + 70, W.gateY + 30, true);
+      const Dd = A.DISTRICTS[G.lastHit != null ? G.lastHit : 0];
+      const res = A.deploy('eren', Dd.gx + Dd.nx * 70 + Dd.ny * 30, Dd.gy + Dd.ny * 70 + Dd.nx * 30, true);
       if (res.ok) { res.unit.pendingSeal = true; D.cd.seal = 999; say('«Стена на пределе. Вводим Эрена: превращение у ворот — и сразу за валуном!»', erwin); }
     }
   }
 
   function escortPlan() {
     const eren = G.units.find((u) => alive(u) && isId(u, 'eren') && ((u.order && u.order.kind === 'seal') || u.form === 'human'));
-    if (!eren || eren.state === 'safe' || eren.x < W.wallX) return;
+    if (!eren || eren.state === 'safe' || SDE(eren) < -HALF()) return;
     const threat = G.titans.filter((t) => !t.dead && A.dist(t, eren) < 140).sort((a, b) => A.dist(a, eren) - A.dist(b, eren))[0];
     if (!threat) return;
     const guard = G.units.find((u) => alive(u) && ['mikasa', 'levi', 'jean', 'connie'].includes(u.card.id) && !u.order && A.dist(u, threat) < 700);
@@ -326,6 +333,42 @@ window.AOT = window.AOT || {};
     }
   }
 
+  // ---------- Переброска войск между районами ----------
+  function postNear(D, i, onWall) {
+    if (onWall) { const a = D.ang + (i % 2 ? 1 : -1) * (0.3 + 0.28 * Math.floor(i / 2) % 1.4); return { x: D.cx + Math.cos(a) * D.r, y: D.cy + Math.sin(a) * D.r }; }
+    const a = D.ang + A.rand(-0.75, 0.75), rr = D.r + A.rand(80, 230);
+    return { x: D.cx + Math.cos(a) * rr, y: D.cy + Math.sin(a) * rr };
+  }
+  const nearD = (u, D) => A.distXY(u.post.x, u.post.y, D.gx, D.gy) < 650;
+  // перебросить бойцов (кроме Эрена) к районам из списка; keep — тех, кто уже там, не трогать
+  A.moveArmyTo = function (idxs, onlyFrom) {
+    const targets = idxs.map((i) => A.DISTRICTS[i]);
+    const moved = {};
+    let k = 0;
+    for (const u of G.units) {
+      if (!alive(u) || u.card.ability === 'shifter') continue;
+      if (targets.some((D) => nearD(u, D))) continue;
+      if (onlyFrom && !onlyFrom(u)) continue;
+      const D = targets[k % targets.length];
+      const p = postNear(D, k++, u.onWall || !!u.card.wallOnly);
+      if (A.relocate(u, p.x, p.y).ok) moved[D.name] = (moved[D.name] || 0) + 1;
+    }
+    return moved;
+  };
+  // Эрвин сам перебрасывает силы: заранее по данным разведки и срочно, если район остался голым
+  A.erwinRedeploy = function (dirs, early) {
+    const erwin = G.auras.erwin;
+    if (!erwin || erwin.dead) return;
+    const targets = dirs.map((i) => A.DISTRICTS[i]);
+    const bare = targets.filter((D) => G.units.filter((u) => alive(u) && nearD(u, D)).length < 2);
+    if (!bare.length) return;
+    const moved = A.moveArmyTo(dirs);
+    const list = Object.entries(moved).map(([n, c]) => `${c} → ${n}`).join(', ');
+    if (!list) return;
+    if (early) say(`«Разведка докладывает: следующий удар — по району ${targets.map((D) => D.name).join(' и ')}. Перебрасываю силы заранее через тыл: ${list}.»`, erwin);
+    else say(`«${bare.map((D) => D.name).join(' и ')} без защиты! Марш-бросок вдоль стены: ${list}.»`, erwin, '#ff6b5a');
+  };
+
   A.director = function (dt) {
     const D = G.dir;
     D.tick = (D.tick || 0) - dt;
@@ -337,6 +380,7 @@ window.AOT = window.AOT || {};
     if (!erwin || G.phase !== 'wave') return;
     const liveT = G.titans.filter((t) => !t.dead);
     if (!liveT.length) return;
+    if ((D.cd.redeploy || 0) <= 0 && G.queue && G.queue.dirs) { D.cd.redeploy = 20; A.erwinRedeploy(G.queue.dirs, false); }
     wallPlan(erwin);
     beastPlan(erwin, liveT);
     colossalPlan(erwin, liveT);

@@ -21,7 +21,7 @@ window.AOT = window.AOT || {};
     resize();
     window.addEventListener('resize', resize);
     A.cam.z = 1.5;
-    A.centerOn(W.wallX + 160, W.gateY);
+    A.centerOn(A.DISTRICTS[0].gx, A.DISTRICTS[0].gy + 60);
     document.getElementById('loading').classList.add('hidden');
 
     const ctx = document.getElementById('game').getContext('2d');
@@ -41,7 +41,7 @@ window.AOT = window.AOT || {};
         if (n >= 12) acc = 0;
       }
       A.render(ctx, vis);
-      A.renderMini(mctx, 320, 140);
+      A.renderMini(mctx, 300, 285);
       hudT -= dt;
       if (hudT <= 0) { hudT = 0.12; A.ui.tick(); }
       requestAnimationFrame(frame);

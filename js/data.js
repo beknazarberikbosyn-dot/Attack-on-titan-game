@@ -4,61 +4,55 @@ window.AOT = window.AOT || {};
   'use strict';
 
   // 1 пиксель карты ≈ 0.5 м. Стена 50 м ≈ 100 px высотой (в виде сверху — полоса).
-  A.WORLD = {
-    W: 3200, H: 1400,
-    wallX: 940, wallW: 56,
-    gateY: 720, gateH: 74,
-    spawnX: 3175,
-    deployMaxX: 2250,   // дальше титанов слишком много — солдат туда не высадить
-    wallHp: 1000,
-  };
+  // Остров Парадиз: 1 px карты ≈ 0.5 км по кольцам стен (масштаб условный)
+  A.WORLD = { W: 4000, H: 3800, wallHp: 1000 };
 
   A.START_POINTS = 50;
 
   // Титаны. pts — баллы за убийство.
   A.TITANS = {
     small: {
-      name: 'Малый титан', short: '3–7 м', hp: 60, speed: 33, h: 14, w: 7,
+      name: 'Малый титан', short: '3–7 м', hp: 60, speed: 20, h: 14, w: 7,
       wallDps: 1.2, reach: 8, atkCd: 2.2, acc: 0.42, pts: 2, aggro: 90, size: 0.6,
       hitDmg: 12, desc: 'Медленный и слабый, но опасен толпой.',
     },
     normal: {
-      name: 'Титан', short: '10–15 м', hp: 130, speed: 24, h: 26, w: 11,
+      name: 'Титан', short: '10–15 м', hp: 130, speed: 15, h: 26, w: 11,
       wallDps: 2.5, reach: 13, atkCd: 2.4, acc: 0.5, pts: 3, aggro: 110, size: 1,
       hitDmg: 25, desc: 'Идёт на запах людей. Хватает тех, кто подлетел слишком близко.',
     },
     deviant: {
-      name: 'Девиант', short: 'аномальный', hp: 150, speed: 44, h: 24, w: 10,
+      name: 'Девиант', short: 'аномальный', hp: 150, speed: 27, h: 24, w: 10,
       wallDps: 3, reach: 14, atkCd: 1.9, acc: 0.55, pts: 5, aggro: 160, size: 1,
       erratic: true, hitDmg: 28,
       desc: 'Непредсказуем: внезапные прыжки, игнорирует приманки, может кинуться на любого.',
     },
     jaw: {
-      name: 'Челюстной титан', short: 'шифтер', hp: 560, speed: 101, h: 20, w: 12,
+      name: 'Челюстной титан', short: 'шифтер', hp: 560, speed: 63, h: 20, w: 12,
       armor: 0.3, wallDps: 5, reach: 14, atkCd: 1.2, acc: 0.62, pts: 30, aggro: 600, size: 1,
       hunter: true, special: true, hitDmg: 70,
       desc: 'Самый быстрый. Охотится на героев, а не на стену. Твёрдые челюсти и когти.',
     },
     female: {
-      name: 'Женская особь', short: 'шифтер', hp: 980, speed: 62, h: 32, w: 13,
+      name: 'Женская особь', short: 'шифтер', hp: 980, speed: 38, h: 32, w: 13,
       wallDps: 6, reach: 18, atkCd: 1.4, acc: 0.6, pts: 40, aggro: 260, size: 1.2,
       harden: true, scream: true, special: true, hitDmg: 80,
       desc: 'Отвердевает загривок под ударом. На половине здоровья кричит и созывает титанов.',
     },
     armored: {
-      name: 'Бронированный титан', short: 'шифтер', hp: 1150, speed: 35, charge: 95, h: 32, w: 16,
+      name: 'Бронированный титан', short: 'шифтер', hp: 1150, speed: 22, charge: 62, h: 32, w: 16,
       armor: 0.85, wallDps: 6, wallHit: 0.09, reach: 16, atkCd: 1.8, acc: 0.5, pts: 60, aggro: 120,
       size: 1.25, special: true, hitDmg: 90,
       desc: 'Броня гасит 85% урона лезвий. Идёт тараном на ворота. Пробивается громовыми копьями.',
     },
     beast: {
-      name: 'Звероподобный титан', short: 'шифтер', hp: 1350, speed: 20, h: 36, w: 16,
+      name: 'Звероподобный титан', short: 'шифтер', hp: 1350, speed: 12, h: 36, w: 16,
       wallDps: 6, reach: 18, atkCd: 1.6, acc: 0.6, pts: 75, aggro: 140, size: 1.4,
-      thrower: true, holdOffset: 1080, throwRange: 1250, special: true, hitDmg: 90,
+      thrower: true, holdSd: 420, throwRange: 680, special: true, hitDmg: 90,
       desc: 'Держится далеко и бомбардирует солдат камнями. Тяжело ранен — отступает.',
     },
     colossal: {
-      name: 'Колоссальный титан', short: '60 м', hp: 3300, speed: 11, h: 120, w: 46,
+      name: 'Колоссальный титан', short: '60 м', hp: 3300, speed: 7, h: 120, w: 46,
       wallDps: 9, wallHit: 0.38, reach: 40, atkCd: 3, acc: 0.4, pts: 100, aggro: 0, size: 4,
       steam: true, special: true, hitDmg: 400,
       desc: 'Обжигающий пар отбрасывает всех рядом. Пробивает ворота ударом. Без пара загривок уязвим.',
@@ -71,7 +65,7 @@ window.AOT = window.AOT || {};
     {
       id: 'garrison', name: 'Отряд гарнизона', tier: 1, cost: 10, kind: 'squad', faction: 'garrison',
       members: 5, dmg: 4, atkCd: 1.5, eva: 0.55, speed: 77, sense: 300, leash: 260, gasUse: 5,
-      cannon: { dmg: 38, cd: 3.2, range: 560, aoe: 28 }, color: '#9b4a3a',
+      cannon: { dmg: 38, cd: 3.2, range: 380, aoe: 28 }, color: '#9b4a3a',
       role: 'Пушки на стене',
       desc: 'Поставь на стену — будут стрелять из пушек. В поле это слабая пехота.',
     },
@@ -165,6 +159,17 @@ window.AOT = window.AOT || {};
     if (n % 5 === 0 && n >= 10) add('colossal', 1, len * 0.6, 4);
     q.sort((a, b) => a.t - b.t);
     return q;
+  };
+
+  // Направления атаки: 0 Трост (юг), 1 Каранес (восток), 2 Ялкелл (север), 3 Кролва (запад)
+  A.waveDirs = function (n) {
+    if (n <= 3) return [0];
+    const order = [1, 0, 3, 2];
+    const p = order[(n - 4) % 4];
+    const dirs = [p];
+    if (n >= 9) dirs.push((p + 1 + (n % 3)) % 4);
+    if (n >= 16) { const t = [0, 1, 2, 3].find((d) => !dirs.includes(d)); dirs.push(t); }
+    return [...new Set(dirs)];
   };
 
   A.waveHpMul = (n) => 1 + (n - 1) * 0.1 + Math.max(0, n - 10) * 0.09;
