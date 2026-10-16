@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Оборона Парадиза</title>
+  <meta name="description" content="Пиксельная стратегия-оборона по мотивам «Атаки титанов»: защищай Стену Роза карточками солдат.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="game"></canvas>
+
+    <header id="hud">
+      <div class="brand">ОБОРОНА<br>ПАРАДИЗА</div>
+      <div class="stat" title="Номер волны">
+        <span class="lbl">Волна</span><span class="val" id="hudWave">0</span>
+      </div>
+      <div class="stat phase">
+        <span class="lbl" id="hudPhaseLbl">До атаки</span><span class="val" id="hudPhase">0:50</span>
+        <button id="btnStart" class="px-btn small">В бой ▶</button>
+      </div>
+      <div class="stat" title="Баллы — за убийство титанов">
+        <span class="lbl">Баллы</span><span class="val gold" id="hudPoints">50</span>
+      </div>
+      <div class="stat wall" title="Прочность Стены Роза. Если упадёт до нуля — поражение.">
+        <span class="lbl">Стена Роза</span>
+        <div class="wallbar"><div id="hudWallFill"></div><span id="hudWall">1000</span></div>
+      </div>
+      <div class="stat" title="Громовые копья: их тратит Эрвин (или Ханджи без него). Пробивают броню.">
+        <span class="lbl">Копья</span><span class="val orange" id="hudSpears">0</span>
+      </div>
+      <div class="stat" title="Сколько отрядов и героев можно держать на поле. Растёт с волнами.">
+        <span class="lbl">На поле</span><span class="val" id="hudField">0/6</span>
+      </div>
+      <div class="ctrls">
+        <button class="px-btn small" id="btnPause" title="Пауза (пробел)">❚❚</button>
+        <button class="px-btn small" id="btnSpeed" title="Скорость (F)">×1</button>
+        <button class="px-btn small" id="btnHelp" title="Как играть">?</button>
+      </div>
+    </header>
+
+    <aside id="log">
+      <div class="log-head">
+        <span>Журнал командования</span>
+        <button class="px-btn tiny" id="btnLog" title="Свернуть">–</button>
+      </div>
+      <div id="logList"></div>
+    </aside>
+
+    <section id="panel" hidden></section>
+
+    <div id="minimapWrap">
+      <canvas id="minimap" width="320" height="140"></canvas>
+      <div class="zoom">
+        <button class="px-btn tiny" id="zoomIn">+</button>
+        <button class="px-btn tiny" id="zoomOut">−</button>
+      </div>
+    </div>
+
+    <footer id="barracks">
+      <div class="barracks-title">
+        <span>КАЗАРМА</span>
+        <small>клик — купить и выбрать · <b>+</b> — купить в резерв · клик по карте — высадить</small>
+      </div>
+      <div id="cards"></div>
+    </footer>
+
+    <div id="tooltip" hidden></div>
+    <div id="toast" hidden></div>
+
+    <div id="overlay">
+      <div class="modal" id="startModal">
+        <h1>ОБОРОНА<br>ПАРАДИЗА</h1>
+        <p class="sub">Пиксельная стратегия по мотивам «Атаки титанов»</p>
+        <div class="rules">
+          <p>Титаны волнами идут с востока к <b>Стене Роза</b>. Если её прочность упадёт до нуля — город падёт.</p>
+          <ul>
+            <li>Покупай <b>карточки</b> за баллы (на старте — 50) и высаживай бойцов кликом по карте.</li>
+            <li>Баллы дают за убитых титанов: малый — 2, обычный — 3, девиант — 5 … Колоссальный — 100.</li>
+            <li><b>Гарнизон на стене</b> стреляет из пушек. <b>Разведкорпус</b> режет загривки — в лесу и городе сильнее, в поле слабее.</li>
+            <li>Газ кончается — бойцы сами летят к складам у стены.</li>
+            <li>Каждый герой думает по-своему. А <b>Эрвин</b> командует всем полем: тратит громовые копья только там, где без них никак, ведёт кавалерию, вводит Леви из резерва.</li>
+          </ul>
+          <p class="keys">Колесо — зум · перетаскивание — обзор · WASD/стрелки · Пробел — пауза · F — скорость · Esc — отмена</p>
+        </div>
+        <button class="px-btn big" id="btnPlay">Начать оборону</button>
+        <p class="best" id="bestWave"></p>
+      </div>
+      <div class="modal" id="overModal" hidden>
+        <h1 class="red">СТЕНА ПАЛА</h1>
+        <div id="overStats"></div>
+        <button class="px-btn big" id="btnRestart">Ещё раз</button>
+      </div>
+    </div>
+
+    <div id="loading">Строим стены…</div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/command.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
