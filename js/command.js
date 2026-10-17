@@ -36,7 +36,8 @@ window.AOT = window.AOT || {};
             A.damageTitan(t, 260 + t.maxHp * 0.16, u, { pierce: true });
             if (t.armor > 0) {
               t.armor = Math.max(0, t.armor - 0.42);
-              A.float(t.x, t.y - t.def.h - 10, t.armor > 0 ? 'Броня треснула!' : 'Броня разбита!', '#ffb36a', true);
+              A.float(t.x, t.y - t.def.h - 10, t.armor > 0 ? 'Корка треснула!' : 'Корка осыпалась!', '#ffb36a', true);
+              A.puff(t.x, t.y, t.def.h * 0.5, { n: 16, col: ['#857b6c', '#93897a', '#6f6a5e', '#5f7040'], spd: 45, up: 14, life: 1.1, size: 2, grow: 0, g: 70, spread: t.def.w * 0.5 });
             }
             t.stunT = Math.max(t.stunT, 1.2);
           },

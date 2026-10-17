@@ -228,7 +228,9 @@ window.AOT = window.AOT || {};
   }
 
   function drawTitan(c, t, time) {
-    const spr = A.titanSprite(t.type, t.variant, t.def.h, t.def.w);
+    // каменная корка Бронированного осыпается по мере того, как копья сбивают броню
+    const lvl = t.type === 'armored' ? (t.armor <= 0.02 ? 0 : Math.min(3, Math.ceil(t.armor / A.TITANS.armored.armor * 3 - 0.01))) : null;
+    const spr = A.titanSprite(t.type, t.variant, t.def.h, t.def.w, lvl);
     const frame = t.crystalT > 0 ? 0 : t.grabT > 0 ? 2 : t.blindT > 0 ? (Math.floor(time * 6) % 2) : (Math.floor(t.anim) % 2);
     const img = spr[frame], k = img.s || 1;
     const dw = img.width / k, dh = img.height / k;
@@ -244,11 +246,12 @@ window.AOT = window.AOT || {};
     if (t.dead) c.globalAlpha = Math.max(0, 1 - t.deadT / 1.2);
     c.drawImage(img, x, y, dw, dh);
     if (t.dead) { c.globalAlpha = Math.max(0, 0.85 * (1 - t.deadT / 1.2)); c.drawImage(whiteOf(img), x, y, dw, dh); c.globalAlpha = 1; return; } // испаряется
-    // броня — стальной отлив, тускнеет по мере того, как её разбивают копья
-    if (t.armor > 0.05) {
-      c.globalAlpha = 0.42 * t.armor + Math.max(0, Math.sin(time * 3 + t.id)) * 0.08;
-      c.drawImage(tintOf(img, '#b9c8d6'), x, y, dw, dh); c.globalAlpha = 1;
-      if (t.spearHits > 0) { c.fillStyle = '#3a2a22'; for (let i = 0; i < t.spearHits * 3; i++) { const hx = t.x + (A.hash(t.id, i, 3) - 0.5) * t.def.w, hy = y + dh * (0.15 + A.hash(t.id, i, 4) * 0.6); c.fillRect(hx, hy, 1.5, 0.5); c.fillRect(hx + 0.5, hy + 0.5, 0.5, 1.5); } }
+    // тлеющие трещины Колоссального пульсируют, в пару — разгораются
+    if (img.glow) {
+      c.globalCompositeOperation = 'lighter';
+      c.globalAlpha = Math.max(0, 0.35 + Math.sin(time * 2.6 + t.id) * 0.18 + (t.steamOn ? 0.35 : 0));
+      c.drawImage(img.glow, x, y, dw, dh);
+      c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
     }
     // кристалл Женской особи
     if (t.crystalT > 0) {

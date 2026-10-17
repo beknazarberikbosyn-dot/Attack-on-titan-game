@@ -513,7 +513,10 @@ window.AOT = window.AOT || {};
     }
     if (t.blindT > 0) { t.anim += dt * 3; return; }
     if (t.stunT > 0) return;
-    if (def.steam) colossalSteam(t, dt);
+    if (def.steam) {
+      colossalSteam(t, dt);
+      if (Math.random() < dt * 4) A.puff(t.x + A.rand(-def.w * 0.4, def.w * 0.4), t.y, A.rand(def.h * 0.2, def.h * 0.9), { n: 1, col: ['#ffb040', '#ff7a2a', '#ffd36a'], spd: 8, up: 18, life: 1.1, size: 1, grow: 0 });
+    }
     if (t.rootT > 0) { titanMelee(t); return; }
     t.anim += dt * spd * 0.12;
 
