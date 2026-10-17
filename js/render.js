@@ -59,6 +59,16 @@ window.AOT = window.AOT || {};
     flashCache.set(cv, w); return w;
   }
 
+  // окрашенная копия спрайта (кристалл, броня)
+  const tintCache = new Map();
+  function tintOf(cv, col) {
+    let m = tintCache.get(col); if (!m) { m = new WeakMap(); tintCache.set(col, m); }
+    let w = m.get(cv); if (w) return w;
+    w = document.createElement('canvas'); w.width = cv.width; w.height = cv.height;
+    const c = w.getContext('2d'); c.drawImage(cv, 0, 0); c.globalCompositeOperation = 'source-in'; c.fillStyle = col; c.fillRect(0, 0, w.width, w.height);
+    m.set(cv, w); return w;
+  }
+
   // облака-тени
   let cloudSprites = null;
   function clouds() {
@@ -113,7 +123,7 @@ window.AOT = window.AOT || {};
     ents.sort((a, b) => a.y - b.y);
     // тени
     for (const e of ents) {
-      if (e.kind === 'titan') { ell(ctx, e.x + 2, e.y, Math.max(3, e.def.w * 0.55), Math.max(1, e.def.w * 0.18), `rgba(10,12,8,${e.dead ? 0.15 : 0.32})`); if (e.def.special && !e.dead) ell(ctx, e.x, e.y + 1, e.def.w * 0.75, Math.max(2, e.def.w * 0.22), 'rgba(200,40,30,0.18)'); }
+      if (e.kind === 'titan') { ell(ctx, e.x + e.def.h * 0.08, e.y, Math.max(3, e.def.w * 0.6), Math.max(1, e.def.w * 0.2), `rgba(10,12,8,${e.dead ? 0.15 : 0.32})`); if (e.def.special && !e.dead) ell(ctx, e.x, e.y + 1, e.def.w * 0.75, Math.max(2, e.def.w * 0.22), 'rgba(200,40,30,0.18)'); }
       else if (!e.onWall) ell(ctx, e.x + 1, e.y, e.card.kind === 'squad' ? 7 : 3, 1, 'rgba(10,12,8,0.3)');
     }
     for (const e of ents) e.kind === 'titan' ? drawTitan(ctx, e, time) : drawUnit(ctx, e, time);
@@ -218,30 +228,53 @@ window.AOT = window.AOT || {};
   }
 
   function drawTitan(c, t, time) {
-    const spr = A.titanSprite(t.type, t.variant);
-    const frame = t.grabT > 0 ? 2 : t.blindT > 0 ? (Math.floor(time * 6) % 2) : (Math.floor(t.anim) % 2);
-    const img = spr[frame];
-    const x = Math.round(t.x - img.width / 2), y = Math.round(t.y - img.height + 1);
+    const spr = A.titanSprite(t.type, t.variant, t.def.h, t.def.w);
+    const frame = t.crystalT > 0 ? 0 : t.grabT > 0 ? 2 : t.blindT > 0 ? (Math.floor(time * 6) % 2) : (Math.floor(t.anim) % 2);
+    const img = spr[frame], k = img.s || 1;
+    const dw = img.width / k, dh = img.height / k;
+    let x = t.x - dw / 2, y = t.y - dh + 1;
+    if (t.def.climber && t.climbed) y -= 10 + Math.sin(time * 10) * 1.5; // карабкается по стене
+    // зона раскалённого пара под Колоссальным
+    if (t.steamOn && !t.dead) {
+      const R0 = t.steamR || 230, pulse = 0.5 + Math.sin(time * 4) * 0.12;
+      c.globalAlpha = 0.16 * pulse; ell(c, t.x, t.y, R0, R0 * 0.42, '#ffb36a');
+      c.globalAlpha = 0.14 * pulse; ell(c, t.x, t.y, R0 * 0.6, R0 * 0.26, '#ff7a3a');
+      c.globalAlpha = 1;
+    }
     if (t.dead) c.globalAlpha = Math.max(0, 1 - t.deadT / 1.2);
-    c.drawImage(img, x, y);
-    if (t.dead) { c.globalAlpha = Math.max(0, 0.85 * (1 - t.deadT / 1.2)); c.drawImage(whiteOf(img), x, y); c.globalAlpha = 1; } // испаряется
-    else if (t.hitFlash > 0) { c.globalAlpha = 0.7; c.drawImage(whiteOf(img), x, y); c.globalAlpha = 1; }
-    if (t.hardenT > 0) { c.globalAlpha = 0.45; c.fillStyle = '#bfe6ff'; c.fillRect(Math.round(t.x - 3), y + Math.round(t.def.h * 0.12), 6, 3); c.globalAlpha = 1; }
-    if (t.dead) { c.globalAlpha = 1; return; }
+    c.drawImage(img, x, y, dw, dh);
+    if (t.dead) { c.globalAlpha = Math.max(0, 0.85 * (1 - t.deadT / 1.2)); c.drawImage(whiteOf(img), x, y, dw, dh); c.globalAlpha = 1; return; } // испаряется
+    // броня — стальной отлив, тускнеет по мере того, как её разбивают копья
+    if (t.armor > 0.05) {
+      c.globalAlpha = 0.42 * t.armor + Math.max(0, Math.sin(time * 3 + t.id)) * 0.08;
+      c.drawImage(tintOf(img, '#b9c8d6'), x, y, dw, dh); c.globalAlpha = 1;
+      if (t.spearHits > 0) { c.fillStyle = '#3a2a22'; for (let i = 0; i < t.spearHits * 3; i++) { const hx = t.x + (A.hash(t.id, i, 3) - 0.5) * t.def.w, hy = y + dh * (0.15 + A.hash(t.id, i, 4) * 0.6); c.fillRect(hx, hy, 1.5, 0.5); c.fillRect(hx + 0.5, hy + 0.5, 0.5, 1.5); } }
+    }
+    // кристалл Женской особи
+    if (t.crystalT > 0) {
+      c.globalAlpha = 0.6; c.drawImage(tintOf(img, '#a8e4ff'), x, y, dw, dh);
+      c.globalAlpha = 0.85; c.strokeStyle = '#e8fbff'; c.lineWidth = 0.5;
+      c.beginPath();
+      for (let i = 0; i < 7; i++) { const sx = t.x + (A.hash(t.id, i, 9) - 0.5) * t.def.w * 1.1, sy = y + dh * (0.1 + A.hash(t.id, i, 8) * 0.85); c.moveTo(sx, sy); c.lineTo(sx + 2, sy - 3); c.lineTo(sx + 3, sy + 1); }
+      c.stroke();
+      c.fillStyle = '#ffffff';
+      for (let i = 0; i < 4; i++) if (Math.sin(time * 5 + i * 1.7) > 0.7) c.fillRect(t.x + (A.hash(t.id, i, 5) - 0.5) * t.def.w, y + dh * A.hash(t.id, i, 6), 1, 1);
+      c.globalAlpha = 1;
+    }
+    if (t.hitFlash > 0) { c.globalAlpha = 0.7; c.drawImage(whiteOf(img), x, y, dw, dh); c.globalAlpha = 1; }
+    if (t.hardenT > 0 && t.crystalT <= 0) { c.globalAlpha = 0.55; c.fillStyle = '#bfe6ff'; c.fillRect(t.x - t.def.w * 0.2, y + dh * 0.14, t.def.w * 0.4, Math.max(1.5, dh * 0.08)); c.globalAlpha = 1; }
+    // ярость
+    if (t.enrageT > 0) { c.fillStyle = '#ff4a3a'; c.fillRect(t.x - t.def.w * 0.12, y + dh * 0.06, 1, 0.6); c.fillRect(t.x + t.def.w * 0.08, y + dh * 0.06, 1, 0.6); }
     // тросы ловушки
     if (t.rootT > 0) {
       c.fillStyle = 'rgba(220,220,220,0.8)';
-      for (let k = 0; k < 6; k++) {
-        const a = k * 1.05 + 0.3, ex = t.x + Math.cos(a) * 46, ey = t.y + Math.sin(a) * 20;
+      for (let kk = 0; kk < 6; kk++) {
+        const a = kk * 1.05 + 0.3, ex = t.x + Math.cos(a) * 46, ey = t.y + Math.sin(a) * 20;
         const n = 30;
         for (let i = 0; i < n; i++) { const p = i / n; c.fillRect(Math.round(A.lerp(t.x, ex, p)), Math.round(A.lerp(t.y - t.def.h * 0.6, ey, p)), 1, 1); }
       }
     }
     if (t.blindT > 0) { c.fillStyle = '#ffef80'; c.fillRect(Math.round(t.x - 4 + Math.sin(time * 8) * 3), y - 3, 1, 1); c.fillRect(Math.round(t.x + 3 - Math.sin(time * 8) * 3), y - 2, 1, 1); }
-    if (t.def.steam && t.steamOn) {
-      c.fillStyle = 'rgba(255,255,255,0.12)';
-      ell(c, t.x, t.y - 20, 70, 26, 'rgba(255,255,255,0.08)');
-    }
   }
 
   function memberPositions(u, time) {
@@ -269,9 +302,9 @@ window.AOT = window.AOT || {};
     // Эрен-титан
     if (card.ability === 'shifter' && u.form === 'titan') {
       const spr = A.titanSprite('eren', 0);
-      const img = spr[u.punch > 0 ? 2 : Math.floor(u.anim * 2) % 2];
+      const img = spr[u.punch > 0 ? 2 : Math.floor(u.anim * 2) % 2], k = img.s || 1;
       ell(c, u.x, u.y + 1, 10, 3, 'rgba(60,200,120,0.25)');
-      c.drawImage(img, Math.round(u.x - img.width / 2), Math.round(u.y - img.height + 1));
+      c.drawImage(img, u.x - img.width / k / 2, u.y - img.height / k + 1, img.width / k, img.height / k);
       if (u.carry) { ell(c, u.x, u.y - 34, 9, 7, '#8a857c'); ell(c, u.x - 2, u.y - 36, 4, 3, '#a29c92'); }
       c.globalAlpha = 1; return;
     }
@@ -342,9 +375,17 @@ window.AOT = window.AOT || {};
         c.globalAlpha = a * 0.7; ell(c, f.x, f.y - 15, f.size * (1.5 - a), f.size * 0.7 * (1.5 - a), f.col); continue;
       }
       const s = Math.max(1, Math.round(f.size + f.grow * (1 - a)));
-      c.globalAlpha = f.smokeTrail ? a * 0.35 : f.flare ? 1 : a * 0.85;
       c.fillStyle = f.col;
-      c.fillRect(Math.round(f.x - s / 2), Math.round(f.y - f.z - s / 2), s, s);
+      if (s >= 4) { // клубы дыма и пара — пиксельные «облачка» из трёх кругов
+        c.globalAlpha = (f.smokeTrail ? 0.35 : 0.55) * a;
+        const r = s / 2, X = f.x, Y = f.y - f.z;
+        ell(c, X, Y, r, r * 0.8, f.col);
+        ell(c, X - r * 0.55, Y + r * 0.25, r * 0.6, r * 0.5, f.col);
+        ell(c, X + r * 0.5, Y + r * 0.3, r * 0.55, r * 0.45, f.col);
+      } else {
+        c.globalAlpha = f.smokeTrail ? a * 0.35 : f.flare ? 1 : a * 0.85;
+        c.fillRect(Math.round(f.x - s / 2), Math.round(f.y - f.z - s / 2), s, s);
+      }
     }
     c.globalAlpha = 1;
   }
@@ -418,6 +459,7 @@ window.AOT = window.AOT || {};
           if (titan) bar(c, p.x, p.y, 26, e.titanHp / e.titanMax, '#5ad16a');
           else if (e.card.kind === 'squad') { for (let i = 0; i < e.maxMembers; i++) { c.fillStyle = i < e.members ? '#e8e0cc' : 'rgba(0,0,0,0.5)'; c.fillRect(Math.round(p.x - e.maxMembers * 2 + i * 4), Math.round(p.y), 3, 3); } }
           else if (e.card.ability !== 'shifter') { for (let i = 0; i < e.maxHp; i++) { c.fillStyle = i < e.hp ? '#e05a5a' : 'rgba(0,0,0,0.5)'; c.fillRect(Math.round(p.x - e.maxHp * 2 + i * 4), Math.round(p.y), 3, 3); } }
+          if (e.heat > 0.05) { bar(c, p.x, p.y - 6, 16, e.heat, '#ff7a3a'); }
           if (!e.card.cannon && !e.card.wallOnly && e.card.ability !== 'shifter' && e.gas < 60) bar(c, p.x, p.y + 5, 14, e.gas / 100, e.gas < 20 ? '#e0503a' : '#7fb8e0');
           if (e.order && ['spear', 'charge', 'flank', 'seal'].includes(e.order.kind)) {
             const lab = { spear: 'копьё', charge: 'атака!', flank: 'фланг', seal: 'валун' }[e.order.kind];

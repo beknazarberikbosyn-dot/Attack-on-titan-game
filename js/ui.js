@@ -109,7 +109,7 @@ window.AOT = window.AOT || {};
     box.querySelector('.pv-empty').hidden = has;
     box.querySelector('[data-pv="clear"]').hidden = !(A.portraits[id] && A.portraits[id].source === 'upload');
     const st = box.querySelector('.pv-state');
-    const txt = G.hand[id] > 0 ? `В резерве: ${G.hand[id]} — кликни по карте, чтобы высадить` : A.canBuy(id).ok ? `Цена: ${c.cost} баллов` : `Цена: ${c.cost} баллов · ${A.canBuy(id).reason}`;
+    const txt = G.hand[id] > 0 ? `В резерве: ${G.hand[id]} — кликни по карте, чтобы высадить` : A.canBuy(id).ok ? `Цена: ${A.cardCost(id)} баллов` : `Цена: ${A.cardCost(id)} баллов · ${A.canBuy(id).reason}`;
     if (st.textContent !== txt) st.textContent = txt;
     box.hidden = false;
   }
@@ -137,6 +137,8 @@ window.AOT = window.AOT || {};
       const txt = h > 0 ? '×' + h : (c.id === 'eren' && G.erenRest ? 'отдых' : '');
       if (he.textContent !== txt) he.textContent = txt;
       el.querySelector('.card-plus').disabled = !can;
+      const ce = el.querySelector('.card-cost'), cost = String(A.cardCost(c.id));
+      if (ce.textContent !== cost) { ce.textContent = cost; ce.classList.toggle('pricey', A.cardCost(c.id) > c.cost); }
     }
     $('#game').classList.toggle('deploying', !!UI.deployCard || !!UI.relocating);
     renderPreview();
@@ -151,7 +153,7 @@ window.AOT = window.AOT || {};
     t.innerHTML = `<h4>${c.name}</h4><div style="color:${A.TIER_COLORS[c.tier]}">Уровень ${A.TIER_NAMES[c.tier]} · ${c.role}</div>
       <div style="margin-top:6px">${c.desc}</div>
       <div class="stats">
-        <span>Цена</span><b>${c.cost} баллов</b>
+        <span>Цена</span><b>${A.cardCost(c.id)} баллов${A.cardCost(c.id) > c.cost ? ' (наценка из-за беспорядков)' : ''}</b>
         <span>Состав</span><b>${strength}</b>
         ${c.dmg ? `<span>Урон</span><b>${c.dmg}${c.kind === 'squad' ? ' × боец' : ''}</b>` : ''}
         ${c.eva ? `<span>Уклонение</span><b>${Math.round(c.eva * 100)}%</b>` : ''}
@@ -252,6 +254,7 @@ window.AOT = window.AOT || {};
       if (e.hardenT > 0) st.push('отвердение'); if (e.rootT > 0) st.push('скован тросами'); if (e.blindT > 0) st.push('ослеплён');
       if (e.markT > 0) st.push('слабые места помечены'); if (e.atWall) st.push('ломает стену'); if (e.retreating) st.push('отступает');
       if (e.disarmT > 0) st.push('без рук'); if (e.charging) st.push('таран!');
+      if (e.crystalT > 0) st.push(`в кристалле (прочность ${Math.ceil(e.crystalHp)})`); if (e.climbed) st.push('на стене');
       set('pSt', st.join(', ') || 'идёт к стене');
       return;
     }
@@ -291,6 +294,14 @@ window.AOT = window.AOT || {};
     f.classList.toggle('low', G.wallHp < G.wallMax * 0.35);
     set('hudSpears', G.spears);
     set('hudField', `${A.fieldCount()}/${A.fieldCap()}`);
+    const L = A.UNREST_LEVELS[G.unrestLvl];
+    set('hudUnrestLvl', `${L.name} ${Math.round(G.unrest)}%`);
+    const uf = $('#hudUnrestFill'); uf.style.width = G.unrest + '%'; uf.style.background = L.col;
+    $('#hudUnrestLvl').style.color = L.col;
+    const ub = $('#unrestBox');
+    ub.classList.toggle('alarm', G.unrestLvl >= 3);
+    const fineNote = G.unrestLvl >= 2 ? ` Следующий штраф через ${Math.ceil(Math.max(0, G.fineT))} с.` : '';
+    ub.title = `Недовольство народа: ${Math.round(G.unrest)}%. ${L.effect}${fineNote}\nРастёт от гибели солдат, частых потерь и ударов по стене. Падает, когда волны отбиты без потерь, когда убиты шифтеры и в спокойное время. Пиксис на поле смягчает гнев на 25%.`;
     set('btnPause', G.paused ? '▶' : '❚❚');
     set('btnSpeed', '×' + SPEEDS[speedIdx]);
   }

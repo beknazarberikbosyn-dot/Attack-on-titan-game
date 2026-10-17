@@ -60,6 +60,14 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #hudWallFill { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: repeating-linear-gradient(90deg, #b9ad94 0 7px, #9a8f7a 7px 9px); transition: width .2s; }
 #hudWallFill.low { background: repeating-linear-gradient(90deg, #d0453a 0 7px, #9a2f26 7px 9px); }
 #hudWall { position: absolute; inset: 0; font-family: var(--px); font-size: 9px; display: flex; align-items: center; justify-content: center; color: var(--ink); text-shadow: 0 0 2px #fff; }
+.stat.unrest { min-width: 150px; cursor: help; }
+.stat.unrest .lbl b { font-weight: 700; text-transform: none; letter-spacing: 0; }
+.unrestbar { height: 10px; background: #1a1c20; border: 2px solid var(--ink); position: relative; }
+.unrestbar::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 29.5%, rgba(0,0,0,.6) 29.5% 30.5%, transparent 30.5% 54.5%, rgba(0,0,0,.6) 54.5% 55.5%, transparent 55.5% 79.5%, rgba(0,0,0,.6) 79.5% 80.5%, transparent 80.5%); }
+#hudUnrestFill { height: 100%; width: 0; background: #6fbf5a; transition: width .3s, background .3s; }
+.stat.unrest.alarm { animation: alarm 1s steps(2) infinite; }
+@keyframes alarm { 50% { filter: brightness(1.5); } }
+.entry.loss .who { color: #ff8a7a; }
 .ctrls { margin-left: auto; display: flex; gap: 6px; }
 
 /* ---------- журнал ---------- */
@@ -144,6 +152,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--tier) 35%, #15181d) 0 6px, #15181d 6px 12px); }
 .card-fallback canvas { width: 44px; height: 40px; image-rendering: pixelated; }
 .card-fallback span { font-family: var(--px); font-size: 11px; color: #fff2c8; text-shadow: 2px 2px 0 var(--ink); }
+.card-cost.pricey { color: #ff8a7a; }
 .card-cost { position: absolute; left: 2px; top: 2px; font-family: var(--px); font-size: 9px; background: var(--ink); color: #ffd45a; padding: 3px 4px; }
 .card-tier { position: absolute; right: 2px; top: 2px; font-family: var(--px); font-size: 8px; background: var(--tier); color: var(--ink); padding: 3px 4px; }
 .card-name { position: absolute; left: 5px; right: 5px; top: 85px; font-size: 12.5px; font-weight: 600; line-height: 1.15; height: 29px; overflow: hidden; }

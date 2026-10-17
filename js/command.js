@@ -136,6 +136,7 @@ window.AOT = window.AOT || {};
       if (SDE(t) > 700) continue;
       if (t.type === 'armored' && t.armor > 0) cands.push({ t, prio: 100 + (t.charging ? 60 : 0) + (t.atWall ? 40 : 0), need: t.armor > 0.45 ? 2 : 1, why: 'armored' });
       else if (t.type === 'colossal' && !t.steamOn && SDE(t) < 450) cands.push({ t, prio: 85, need: 2, why: 'colossal' });
+      else if (t.type === 'female' && t.crystalT > 0 && G.t > (t.spearOkT || 0)) cands.push({ t, prio: 80, need: 1, why: 'crystal', cd: 4 });
       else if (t.type === 'female' && (t.hardenT > 0 || t.rootT > 0) && free > reserve + 1 && G.t > (t.spearOkT || 0)) cands.push({ t, prio: 60, need: 1, why: 'female', cd: 9 });
       else if (t.type === 'jaw' && free > reserve + 2 && SDE(t) < 350 && G.t > (t.spearOkT || 0)) cands.push({ t, prio: 40, need: 1, why: 'jaw', cd: 12 });
     }
@@ -153,6 +154,7 @@ window.AOT = window.AOT || {};
         const reasons = {
           armored: `«${c.t.def.name} ${c.t.charging ? 'разгоняется на ворота' : 'идёт к стене'}. Лезвия его не возьмут — ${u === erwin ? 'беру копьё сам' : u.card.name + ', громовое копьё в сочленения'}!»`,
           colossal: `«Пар иссяк — ${u === erwin ? 'бью копьём сам' : u.card.name + ', копьё в загривок Колоссальному'}, пока он беззащитен!»`,
+          crystal: `«Она прячется в кристалле и лечится! ${u === erwin ? 'Бью копьём сам' : u.card.name + ', громовое копьё в кристалл'} — расколоть, пока не вылечилась!»`,
           female: `«Она отвердела/скована — ${u.card.name}, копьём по защите, чтобы клинки дошли до загривка!»`,
           jaw: `«Челюстной охотится на наших — копьё ему, запас позволяет.»`,
         };
@@ -213,7 +215,7 @@ window.AOT = window.AOT || {};
         return;
       }
     }
-    if (soldiers >= 6) {
+    if (soldiers >= 6 && G.unrest < 65) {
       const n = sendCharge(14, true);
       say(`«Иначе его не достать. Все ${n} звеньев и я — самоубийственная кавалерийская атака! Мы — приманка. Сигнальные ракеты в лицо, сорвём его броски!» (часть бойцов погибнет)`, erwin, '#ff6b5a');
       return;
@@ -227,7 +229,9 @@ window.AOT = window.AOT || {};
       u.order = { kind: 'fallback', x: ip.x, y: ip.y, exp: G.t + 22, why: 'Укрывается от камнепада за стеной' };
       moved++;
     }
-    if (moved) say(`«Людей для атаки мало — не будем отдавать их камням. Все ${moved} звеньев — за стену! Пусть работают пушки.»`, erwin);
+    if (moved) say(soldiers >= 6
+      ? `«Город и так на грани бунта — ещё одна кавалерийская атака, и нас сметут собственные горожане. Все ${moved} звеньев — за стену! Пусть работают пушки.»`
+      : `«Людей для атаки мало — не будем отдавать их камням. Все ${moved} звеньев — за стену! Пусть работают пушки.»`, erwin);
   }
 
   function colossalPlan(erwin, liveT) {
@@ -235,16 +239,16 @@ window.AOT = window.AOT || {};
     const col = liveT.find((t) => t.type === 'colossal');
     if (!col || SDE(col) > 450) return;
     if (col.steamOn && (D.cd.colSteam || 0) <= 0) {
-      const near = G.units.filter((u) => alive(u) && A.reachable(u) && A.dist(u, col) < 200 && u.card.ability !== 'shifter');
+      const near = G.units.filter((u) => alive(u) && A.reachable(u) && A.dist(u, col) < 250 && u.card.ability !== 'shifter');
       if (near.length) {
         D.cd.colSteam = 14;
         near.forEach((u) => {
           const dx = u.x - col.x, dy = u.y - col.y, d = Math.hypot(dx, dy) || 1;
-          let fx = col.x + dx / d * 240, fy = col.y + dy / d * 240;
+          let fx = col.x + dx / d * 270, fy = col.y + dy / d * 270;
           if (A.sdRose(fx, fy) < HALF() + 20) { const p = A.wallPoint(fx, fy, HALF() + 25); fx = p.x; fy = p.y; }
           u.order = { kind: 'fallback', x: fx, y: fy, exp: G.t + Math.max(3, col.steamT), why: 'Ждёт, пока иссякнет пар' };
         });
-        say(`«Пар! ${near.length} звеньев — отойти от Колоссального. Ждём: он сжигает сам себя.»`, erwin);
+        say(`«Раскалённый пар! ${near.length} звеньев — отойти от Колоссального на сотню метров. Ждём: он сжигает сам себя.»`, erwin);
       }
     }
     if (!col.steamOn && (D.cd.colStrike || 0) <= 0) {

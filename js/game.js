@@ -17,7 +17,10 @@ window.AOT = window.AOT || {};
     if (A.onLog) A.onLog(e);
   };
   A.float = function (x, y, text, col, big) {
-    G.floaters.push({ x, y, text, col: col || '#fff', life: big ? 2.2 : 1.5, max: big ? 2.2 : 1.5, big: !!big });
+    // не даём надписям наползать друг на друга: новая встаёт выше свежих соседних
+    let stack = 0;
+    for (const f of G.floaters) if (Math.abs(f.x - x) < 40 && Math.abs(f.y - y) < 10 + stack * 8 && f.life > f.max - 1.2) stack++;
+    G.floaters.push({ x, y: y - stack * 8, text, col: col || '#fff', life: big ? 2.2 : 1.5, max: big ? 2.2 : 1.5, big: !!big });
   };
   A.puff = function (x, y, z, opts) {
     const o = opts || {};
@@ -61,28 +64,108 @@ window.AOT = window.AOT || {};
       kills: 0, killsBy: {}, lost: 0, rockHits: [], shake: 0,
       analyzed: {}, sealed: false, erenRest: false, auras: {}, dir: { cd: {} },
       speed: 1, paused: false,
+      unrest: 0, unrestLvl: 0, deaths: [], fineT: 20, mpT: 0, waveLosses: 0, soldiersLost: 0, prevWall: W.wallHp, unrestTick: 1,
     });
     A.CARDS.forEach((c) => { G.hand[c.id] = 0; });
     G.nextQueue = prepQueue(1);
     A.log('Штаб', 'Стена Мария пала. Разведка: титаны идут из павших земель к району Трост (юг Стены Роза). Купите карточки и расставьте бойцов у Троста — волна начнётся по таймеру или по кнопке «В бой».', 'info');
   };
 
+  // ---------- Недовольство народа ----------
+  // Каждый погибший солдат — чей-то сын и налоги, ушедшие впустую. Чем хуже командование,
+  // тем злее горожане: сначала ропот, потом протесты, бунт и вмешательство Военной полиции.
+  A.UNREST_LEVELS = [
+    { name: 'Спокойствие', col: '#6fbf5a', effect: 'Налоги поступают полностью.' },
+    { name: 'Ропот', col: '#d9c050', effect: 'Награда за волну −25%: часть налогов не доходит до казны.' },
+    { name: 'Протесты', col: '#ff9f4a', effect: 'Награда за волну −50%, карточки дороже на 15%, штрафы каждые 25 с.' },
+    { name: 'Бунт', col: '#e0503a', effect: 'Налогов нет, карточки дороже на 30%, штрафы каждые 15 с. На 100% вмешается Военная полиция.' },
+  ];
+  const UNREST_EDGES = [30, 55, 80];
+  A.unrestLevelOf = (v) => (v >= UNREST_EDGES[2] ? 3 : v >= UNREST_EDGES[1] ? 2 : v >= UNREST_EDGES[0] ? 1 : 0);
+  A.addUnrest = function (v, why) {
+    if (!v || G.over) return;
+    if (v > 0 && G.auras && G.auras.pyxis) v *= 0.75; // народ уважает Пиксиса
+    G.unrest = A.clamp(G.unrest + v, 0, 100);
+    const lvl = A.unrestLevelOf(G.unrest);
+    if (lvl !== G.unrestLvl) {
+      const up = lvl > G.unrestLvl;
+      G.unrestLvl = lvl;
+      const L = A.UNREST_LEVELS[lvl];
+      const upMsg = [
+        '',
+        'По району ползёт ропот: «Наших сыновей отправляют на убой». Часть налогов не доходит до казны.',
+        'На площадях протесты! Люди требуют ответа за погибших. Торговцы подняли цены на снаряжение, совет знати выставляет штрафы.',
+        'В городе бунт! Горожане отказываются платить налоги, снаряжение подорожало на 30%. Ещё немного — и вмешается Военная полиция.',
+      ];
+      const downMsg = ['Народ успокоился — налоги снова поступают полностью.', 'Протесты стихли, но люди всё ещё ропщут.', 'Бунт подавлен, но протесты продолжаются.'];
+      A.log('Народ', up ? upMsg[lvl] : downMsg[lvl], up ? 'loss' : 'kill');
+      A.float(A.DISTRICTS[0].cx, A.DISTRICTS[0].cy, L.name, L.col, true);
+      if (up && lvl >= 2) G.fineT = lvl === 3 ? 15 : 25;
+    }
+  };
+  const FINE_TEXTS = [
+    (x) => `Совет знати взыскал компенсации семьям погибших: −${x} б.`,
+    (x) => `Торговцы отказались платить налоги: −${x} б.`,
+    (x) => `Беспорядки на рынке — казна оплачивает ущерб: −${x} б.`,
+    (x) => `Военная полиция требует отчёт о потерях и выписывает штраф: −${x} б.`,
+    (x) => `Церковь Стен собрала толпу у казарм — откупаемся: −${x} б.`,
+  ];
+  function updateUnrest(dt) {
+    // тяжесть утраты стены тоже бьёт по настроению
+    const dW = G.prevWall - G.wallHp;
+    if (dW > 0) A.addUnrest((dW / G.wallMax) * 100 * 0.45);
+    G.prevWall = G.wallHp;
+    G.deaths = G.deaths.filter((t) => G.t - t < 60);
+    G.unrestTick -= dt;
+    if (G.unrestTick <= 0) {
+      G.unrestTick = 1;
+      const recent = G.deaths.filter((t) => G.t - t < 30).length;
+      if (G.phase === 'wave' && recent >= 5) {
+        A.addUnrest((recent - 4) * 0.3);
+        if (!G.panicLogT || G.t - G.panicLogT > 30) { G.panicLogT = G.t; A.log('Народ', `Горожане в ужасе: за полминуты погибло ${recent} солдат. «Командование бросает людей на смерть!»`, 'loss'); }
+      }
+      const quiet = !G.deaths.some((t) => G.t - t < 25);
+      if (G.phase !== 'wave') A.addUnrest(-0.5);
+      else if (quiet) A.addUnrest(-0.2);
+    }
+    // штрафы
+    if (G.unrestLvl >= 2) {
+      G.fineT -= dt;
+      if (G.fineT <= 0) {
+        G.fineT = G.unrestLvl === 3 ? 15 : 25;
+        const x = Math.min(G.points, G.unrestLvl === 3 ? 8 + G.wave * 3 : 4 + G.wave * 2);
+        if (x > 0) { G.points -= x; A.log('Казна', A.pick(FINE_TEXTS)(x), 'loss'); A.float(A.DISTRICTS[0].cx, A.DISTRICTS[0].cy - 30, `Штраф −${x}`, '#ff8a7a', true); }
+      }
+    }
+    G.mpT -= dt;
+    if (G.unrest >= 100 && G.mpT <= 0) {
+      G.mpT = 60;
+      const x = Math.floor(G.points * 0.35);
+      G.points -= x; G.unrest = 82;
+      A.log('Военная полиция', `Вмешательство в дела армии! Конфисковано ${x} б. «Ещё один такой провал — и командование сменят».`, 'loss');
+      A.float(A.DISTRICTS[0].cx, A.DISTRICTS[0].cy - 50, `Конфискация −${x}`, '#ff6b5a', true);
+      G.shake = 0.4;
+    }
+  }
+
   // ---------- Экономика ----------
   A.onField = (id) => G.units.some((u) => !u.dead && u.card.id === id && u.state !== 'safe');
   A.ownedCount = (id) => G.hand[id] + (A.onField(id) ? 1 : 0) + (id === 'eren' && G.erenRest ? 1 : 0);
+  A.costMul = () => [1, 1, 1.15, 1.3][G.unrestLvl || 0];
+  A.cardCost = (id) => Math.round(A.CARD[id].cost * A.costMul());
   A.canBuy = function (id) {
     const c = A.CARD[id];
-    if (G.points < c.cost) return { ok: false, reason: 'Не хватает баллов' };
+    if (G.points < A.cardCost(id)) return { ok: false, reason: 'Не хватает баллов' };
     if (c.kind === 'hero' && A.ownedCount(id) > 0) return { ok: false, reason: 'Персонаж уже у вас' };
     return { ok: true };
   };
   A.buy = function (id) {
     const can = A.canBuy(id);
     if (!can.ok) return can;
-    const c = A.CARD[id];
-    G.points -= c.cost;
+    const c = A.CARD[id], cost = A.cardCost(id);
+    G.points -= cost;
     G.hand[id]++;
-    A.log('Казарма', `Получена карточка «${c.name}» (−${c.cost} б.)`, 'buy');
+    A.log('Казарма', `Получена карточка «${c.name}» (−${cost} б.${cost > c.cost ? ', наценка из-за беспорядков' : ''})`, 'buy');
     return { ok: true };
   };
 
@@ -149,7 +232,7 @@ window.AOT = window.AOT || {};
   }
   A.spawnUnitDirect = spawnUnit;
 
-  A.reinforceCost = (u) => (u.card.kind === 'squad' && u.members < u.maxMembers ? Math.ceil(u.card.cost * 0.6 * (u.maxMembers - u.members) / u.maxMembers) : 0);
+  A.reinforceCost = (u) => (u.card.kind === 'squad' && u.members < u.maxMembers ? Math.ceil(u.card.cost * 0.6 * A.costMul() * (u.maxMembers - u.members) / u.maxMembers) : 0);
   A.reinforce = function (u) {
     const cost = A.reinforceCost(u);
     if (!cost || G.points < cost || u.dead) return false;
@@ -191,6 +274,10 @@ window.AOT = window.AOT || {};
   function killUnit(u, cause) {
     if (u.dead) return;
     u.dead = true; u.deadT = 0; G.lost++;
+    if (u.card.kind === 'hero') {
+      G.deaths.push(G.t); G.waveLosses++; G.soldiersLost++;
+      A.addUnrest(u.card.tier >= 3 ? 10 : 5, `гибель: ${u.card.name}`);
+    } else A.addUnrest(2, 'гибель целого отряда');
     A.log('Потери', `${u.card.name} — ${cause || 'пал(а) в бою'}.`, 'loss');
     A.float(u.x, u.y - 12, u.card.kind === 'squad' ? 'Отряд погиб' : 'Погиб(ла)', '#ff6b5a', true);
   }
@@ -202,7 +289,7 @@ window.AOT = window.AOT || {};
     const c = u.card;
     if (c.ability === 'shifter') {
       if (u.form === 'titan') {
-        const dmg = kind === 'rock' ? 140 : kind === 'steam' ? 70 : (src && src.def ? src.def.hitDmg : 40);
+        const dmg = kind === 'rock' ? 140 : kind === 'steam' ? 60 : (src && src.def ? src.def.hitDmg : 40);
         u.titanHp -= dmg;
         A.float(u.x, u.y - 34, '-' + Math.round(dmg), '#ffb0a0');
         if (u.titanHp <= 0) erenEmerge(u, 'титан Эрена повержен');
@@ -215,20 +302,33 @@ window.AOT = window.AOT || {};
     }
     if (c.kind === 'squad') {
       u.members--;
-      A.float(u.x, u.y - 10, '−1 боец', '#ff8a7a');
-      if (u.members <= 0) killUnit(u, kind === 'rock' ? 'накрыт камнями' : kind === 'steam' ? 'обварен паром' : 'перебит титанами');
+      G.deaths.push(G.t); G.waveLosses++; G.soldiersLost++;
+      A.addUnrest(1.3);
+      A.float(u.x, u.y - 10, kind === 'steam' ? 'Ожог! −1 боец' : kind === 'quake' ? 'Сорвался со стены' : '−1 боец', '#ff8a7a');
+      if (u.members <= 0) killUnit(u, kind === 'rock' ? 'накрыт камнями' : kind === 'steam' ? 'сварен заживо в пару' : kind === 'quake' ? 'сброшен со стены ударом' : 'перебит титанами');
     } else {
       u.hp--;
       A.float(u.x, u.y - 14, u.hp > 0 ? 'Ранен(а)!' : '', '#ff8a7a');
-      if (u.hp <= 0) killUnit(u, kind === 'rock' ? 'погиб(ла) под камнепадом' : kind === 'steam' ? 'погиб(ла) в пару' : 'погиб(ла) в бою');
+      if (kind === 'steam') A.float(u.x, u.y - 22, 'Ожог!', '#ffb36a');
+      if (u.hp <= 0) killUnit(u, kind === 'rock' ? 'погиб(ла) под камнепадом' : kind === 'steam' ? 'погиб(ла) в раскалённом пару' : kind === 'quake' ? 'сорвался(лась) со стены' : 'погиб(ла) в бою');
       else if (u.hp === 1 && c.ability !== 'spin') { u.thought = 'Тяжело ранен(а) — отходит к складу'; u.state = 'resupply'; u.target = null; }
     }
   };
 
   // ---------- Титаны ----------
   A.spawnTitan = function (type, opts) {
-    const def = A.TITANS[type];
+    const base = A.TITANS[type];
     opts = opts || {};
+    // у обычных титанов свой рост (3–7 м, 10–15 м…), шифтеры — всегда своего размера
+    let def = base;
+    if (base.sizeVar) {
+      const k = A.rand(base.sizeVar[0], base.sizeVar[1]);
+      const kq = Math.round(k * 4) / 4; // 4 ступени роста — меньше разных спрайтов
+      def = Object.assign({}, base, {
+        h: Math.max(6, Math.round(base.h * kq)), w: Math.max(4, Math.round(base.w * kq)), hp: base.hp * (0.55 + 0.45 * kq),
+        reach: base.reach * (0.6 + 0.4 * kq), hitDmg: base.hitDmg * kq, size: base.size * kq,
+      });
+    }
     const t = {
       id: nextId++, kind: 'titan', type, def,
       x: 0, y: 0, district: opts.district != null ? opts.district : 0,
@@ -238,7 +338,7 @@ window.AOT = window.AOT || {};
       forced: null, forcedT: 0, enrageT: 0, grabT: 0, disarmT: 0, distractT: 0, hitFlash: 0,
       leapT: A.rand(2, 5), leap: null, throwT: 3, wallHitT: 0, steamOn: false, steamT: 6, steamTick: 0,
       anim: A.rand(0, 10), variant: A.randInt(0, 11), dead: false, deadT: 0, screamed: false, retreating: false,
-      spearHits: 0,
+      spearHits: 0, crystalT: 0, crystalHp: 0, crystals: 0, heat: 0,
     };
     if (opts.near) { t.x = opts.near.x + A.rand(-180, 180); t.y = opts.near.y + A.rand(-180, 180); t.district = opts.near.district || 0; }
     else if (opts.x != null) { t.x = opts.x; t.y = opts.y; }
@@ -253,10 +353,11 @@ window.AOT = window.AOT || {};
       }
     }
     clampTitan(t);
+    t.variant = A.randInt(0, 7);
     G.titans.push(t);
     if (def.special) {
       A.log('Дозор', `На горизонте: ${def.name}! ${def.desc}`, 'warn');
-      if (type === 'colossal') { A.steamBurst(t.x, t.y, 120); G.shake = 1.2; }
+      if (type === 'colossal') { A.steamBurst(t.x, t.y, 120); G.shake = 1.2; G.flash = 0.6; }
     }
     return t;
   };
@@ -271,6 +372,19 @@ window.AOT = window.AOT || {};
   A.damageTitan = function (t, dmg, src, opts) {
     if (t.dead) return 0;
     opts = opts || {};
+    // кристалл Женской особи: лезвия почти не берут, копья раскалывают
+    if (t.crystalT > 0) {
+      t.crystalHp -= dmg * (opts.pierce ? 1.6 : 0.12);
+      t.hitFlash = 0.08;
+      if (opts.melee && A.chance(0.3)) A.sparks(t.x, t.y, t.def.h * 0.6, ['#dff6ff', '#a8e4ff']);
+      if (t.crystalHp <= 0) {
+        t.crystalT = 0; t.hardenT = 0;
+        A.float(t.x, t.y - t.def.h - 8, 'Кристалл расколот!', '#a8e4ff', true);
+        A.log('Дозор', 'Кристалл Женской особи расколот — она снова уязвима!', 'kill');
+        A.puff(t.x, t.y, t.def.h * 0.5, { n: 18, col: ['#dff6ff', '#a8e4ff', '#ffffff'], spd: 40, up: 12, life: 0.8, size: 2, grow: 0, g: 40 });
+      }
+      return 0;
+    }
     let d = dmg;
     if (opts.pierce) { /* копьё — броня не помогает */ }
     else if (opts.armorPen) d *= 1 - t.armor * (1 - opts.armorPen);
@@ -283,6 +397,18 @@ window.AOT = window.AOT || {};
     if (G.analyzed[t.type]) d *= 1.1;
     t.hp -= d;
     t.hitFlash = 0.12;
+    // титан отбивается от того, кто режет ему загривок
+    if (src && src.card && opts.melee && !t.def.hunter && t.hp > 0 && src.card.ability !== 'shifter' && A.chance(0.5)) {
+      t.forced = src; t.forcedT = 2.5;
+      if (t.atkT > 0.6) t.atkT = A.rand(0.3, 0.6);
+    }
+    if (t.def.crystal && t.hp > 0 && t.crystals < 2 && t.hp < t.maxHp * (t.crystals ? 0.15 : 0.4)) {
+      t.crystals++;
+      t.crystalT = 14; t.crystalHp = t.maxHp * 0.32; t.hardenT = 0;
+      A.float(t.x, t.y - t.def.h - 10, 'КРИСТАЛЛ!', '#a8e4ff', true);
+      A.log('Дозор', 'Женская особь покрылась слоем кристалла и восстанавливается внутри! Лезвия его не берут — нужны громовые копья.', 'warn');
+    }
+    if (t.def.thrower && !t.screamed && t.hp < t.maxHp * 0.65 && t.hp > 0) beastScream(t);
     // отвердение у Женской особи
     if (t.def.harden && !opts.pierce && opts.melee && t.hardenCd <= 0 && t.hp < t.maxHp * 0.85 && A.chance(0.33)) {
       t.hardenT = 2.5; t.hardenCd = 8;
@@ -306,21 +432,28 @@ window.AOT = window.AOT || {};
     G.killsBy[t.type] = (G.killsBy[t.type] || 0) + 1;
     if (!captured) A.steamBurst(t.x, t.y, t.def.h);
     A.float(t.x, t.y - t.def.h - 4, '+' + pts, '#ffd45a', t.def.special);
-    const who = src && src.card ? src.card.name : src === 'cannon' ? 'Пушки гарнизона' : src === 'spear' ? 'Громовое копьё' : 'Солдаты';
-    if (t.def.special) A.log(who, `${captured ? 'захвачен' : 'уничтожен'}: ${t.def.name}! +${pts} б.`, 'kill');
+    const who = src && src.card ? src.card.name : src === 'cannon' ? 'Пушки гарнизона' : src === 'spear' ? 'Громовое копьё' : src === 'self' ? 'Истощение' : 'Солдаты';
+    if (t.def.special) { A.log(who, `${captured ? 'захвачен' : 'уничтожен'}: ${t.def.name}! +${pts} б.`, 'kill'); A.addUnrest(-6, 'победа над шифтером'); }
+    else A.addUnrest(-0.12);
     if (src && src.card) src.kills = (src.kills || 0) + 1;
   }
 
+  // кого титан вообще может достать: Челюстной взбирается на стену
+  function canReach(t, u) {
+    if (!A.unitAlive(u) || inTown(u)) return false;
+    if (!u.onWall) return true;
+    return !!t.def.climber;
+  }
   function titanTarget(t) {
-    if (t.forcedT > 0 && t.forced && reachable(t.forced)) return t.forced;
+    if (t.forcedT > 0 && t.forced && canReach(t, t.forced)) return t.forced;
     const def = t.def;
     let best = null, bd = 1e9;
     const aggro = def.aggro * (t.enrageT > 0 ? 1.5 : 1);
     for (const u of G.units) {
-      if (!reachable(u)) continue;
+      if (!canReach(t, u)) continue;
       const d = A.dist(t, u);
       let score = d;
-      if (def.hunter) { if (u.card.kind !== 'hero') score *= 2.5; if (d > 700) continue; }
+      if (def.hunter) { if (u.card.kind !== 'hero') score *= u.onWall ? 1.6 : 2.5; if (d > 700) continue; }
       else if (d > aggro) continue;
       // беспомощный Эрен — лакомая цель
       if (u.card.ability === 'shifter' && u.form === 'human' && u.state !== 'deploy') score *= 0.4;
@@ -345,15 +478,17 @@ window.AOT = window.AOT || {};
     let victim = null, vd = 1e9;
     for (const u of G.units) {
       if (!A.unitAlive(u)) continue;
-      const canReachWall = t.type === 'colossal' && u.onWall;
+      const canReachWall = (t.type === 'colossal' || t.def.climber) && u.onWall && !inTown(u);
       if (!reachable(u) && !canReachWall) continue;
-      const d = A.dist(t, u) - (u.target === t ? 6 : 0);
+      const d = A.dist(t, u) - (u.target === t ? 10 : 0);
       if (d < reach && d < vd) { vd = d; victim = u; }
     }
     if (!victim) return;
     t.atkT = t.def.atkCd * A.rand(0.8, 1.2);
     t.grabT = 0.6;
-    let p = t.def.acc * (1 - effEva(victim));
+    // уклонение не абсолютно: даже ловкие бойцы рискуют, вися у загривка
+    let p = t.def.acc * (1 - effEva(victim) * 0.86);
+    if (victim.target === t) p *= 1.15;
     if (victim.order && victim.order.kind === 'charge') p *= 1.2;
     if (t.enrageT > 0) p *= 1.2;
     if (A.chance(p)) A.hitUnit(victim, t, 'melee');
@@ -365,6 +500,17 @@ window.AOT = window.AOT || {};
     for (const k of ['atkT', 'blindT', 'stunT', 'markT', 'rootT', 'hardenT', 'hardenCd', 'forcedT', 'enrageT', 'grabT', 'disarmT', 'distractT', 'wallHitT', 'hitFlash']) if (t[k] > 0) t[k] -= dt;
     const def = t.def;
     let spd = def.speed * G.spdMul * (t.enrageT > 0 ? 1.4 : 1);
+    if (t.crystalT > 0) {
+      t.crystalT -= dt;
+      t.hp = Math.min(t.maxHp, t.hp + t.maxHp * 0.018 * dt);
+      spd *= 0.55;
+      if (t.crystalT <= 0) { A.float(t.x, t.y - def.h - 8, 'Кристалл осыпался', '#a8e4ff'); A.log('Дозор', 'Кристалл Женской особи осыпался — она подлечилась внутри и снова идёт в бой.', 'warn'); }
+    }
+    if (def.climber) {
+      const onW = SDE(t) < HALF() + 2;
+      if (onW && !t.climbed) { t.climbed = true; A.float(t.x, t.y - def.h - 6, 'Лезет на стену!', '#ffcf6a', true); A.log('Дозор', 'Челюстной вскарабкался на Стену Роза — расчёты пушек под ударом!', 'warn'); }
+      if (!onW) t.climbed = false;
+    }
     if (t.blindT > 0) { t.anim += dt * 3; return; }
     if (t.stunT > 0) return;
     if (def.steam) colossalSteam(t, dt);
@@ -422,6 +568,7 @@ window.AOT = window.AOT || {};
     }
     let tx, ty;
     if (tgt) { tx = tgt.x; ty = tgt.y; } else { const g = gateTarget(t); tx = g.x; ty = g.y; }
+    if (def.climber) t.wantWall = !!(tgt && tgt.onWall);
     if (def.charge && !tgt) {
       if (SDE(t) < 380 && t.wallHitT <= 0) { spd = def.charge * G.spdMul; t.charging = true; }
     }
@@ -434,7 +581,7 @@ window.AOT = window.AOT || {};
 
   function clampTitan(t) {
     const n = A.roseNormal(t.x, t.y);
-    const min = HALF() + t.def.w * 0.5;
+    const min = t.def.climber && t.wantWall ? 0 : HALF() + t.def.w * 0.5;
     if (n.sd < min) { t.x += n.x * (min - n.sd); t.y += n.y * (min - n.sd); }
     const rr = A.rFromC(t.x, t.y), mx = A.R.maria - 20;
     if (rr > mx) { t.x = A.C.x + (t.x - A.C.x) * mx / rr; t.y = A.C.y + (t.y - A.C.y) * mx / rr; }
@@ -448,6 +595,7 @@ window.AOT = window.AOT || {};
       G.wallHp -= G.wallMax * t.def.wallHit;
       G.shake = 0.8; t.charging = false; t.wallHitT = 15; t.x += wp.nx * 60; t.y += wp.ny * 60;
       A.dust(wp.x, wp.y, 2);
+      wallQuake(wp.x, wp.y, 150, 0.55);
       A.log('Стена', `Бронированный протаранил стену! (−${Math.round(t.def.wallHit * 100)}% прочности)`, 'warn');
       return;
     }
@@ -455,11 +603,40 @@ window.AOT = window.AOT || {};
       t.kicked = true;
       G.wallHp -= G.wallMax * t.def.wallHit; G.shake = 1.5;
       A.dust(wp.x, wp.y, 3);
+      wallQuake(wp.x, wp.y, 240, 0.8);
       A.log('Стена', `Колоссальный ударил по стене! (−${Math.round(t.def.wallHit * 100)}% прочности)`, 'warn');
     }
     G.wallHp -= t.def.wallDps * dt;
     t.atWall = true;
     if (Math.random() < dt * 0.8) A.dust(wp.x + A.rand(-5, 5), wp.y + A.rand(-5, 5), 0.4);
+  }
+
+  // удар по стене: расчёты наверху срываются вниз
+  function wallQuake(x, y, r, p) {
+    let n = 0;
+    for (const u of G.units) {
+      if (!A.unitAlive(u) || !u.onWall || A.distXY(u.x, u.y, x, y) > r) continue;
+      if (u.card.kind === 'squad') { const k = A.chance(p) ? (A.chance(0.4) ? 2 : 1) : 0; for (let i = 0; i < k && !u.dead; i++) { A.hitUnit(u, null, 'quake'); n++; } }
+      else if (A.chance(p * 0.35)) { A.hitUnit(u, null, 'quake'); n++; }
+    }
+    if (n) A.log('Стена', `От удара стена содрогнулась — ${n} бойцов сорвались вниз.`, 'loss');
+  }
+
+  // Крик Звероподобного: среди наших отрядов поднимаются титаны
+  function beastScream(t) {
+    t.screamed = true;
+    const field = G.units.filter((u) => reachable(u) && SDE(u) > HALF() + 20);
+    let c = null, best = 0;
+    for (const u of field) { const n = field.filter((o) => A.dist(o, u) < 160).length; if (n > best) { best = n; c = u; } }
+    A.float(t.x, t.y - t.def.h - 10, 'КРИК!', '#ffdf7a', true);
+    G.shake = Math.max(G.shake, 0.6);
+    if (!c) { A.log('Дозор', 'Звероподобный издал крик — к счастью, рядом с ним нет наших отрядов.', 'warn'); return; }
+    for (let i = 0; i < 3; i++) {
+      const a = A.rand(0, 6.28), r = A.rand(50, 110);
+      const n = A.spawnTitan(A.chance(0.75) ? 'small' : 'normal', { x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r });
+      n.district = t.district; n.enrageT = 6; A.steamBurst(n.x, n.y, n.def.h);
+    }
+    A.log('Дозор', 'Звероподобный закричал — прямо среди наших отрядов поднялись титаны!', 'warn');
   }
 
   function colossalSteam(t, dt) {
@@ -468,19 +645,38 @@ window.AOT = window.AOT || {};
     if (t.steamT <= 0) {
       t.steamOn = !t.steamOn;
       t.steamT = t.steamOn ? 9 : 6;
+      if (t.steamOn) {
+        // выброс: всех рядом отбрасывает
+        for (const u of G.units) {
+          if (!reachable(u) || A.dist(t, u) > 160 || u.card.ability === 'shifter') continue;
+          const dx = u.x - t.x, dy = u.y - t.y, l = Math.hypot(dx, dy) || 1;
+          u.x += dx / l * 60; u.y += dy / l * 60; u.target = null; u.state = 'return';
+        }
+        A.steamBurst(t.x, t.y, 160); G.shake = Math.max(G.shake, 0.5);
+        if (!t.steamLogged) { t.steamLogged = true; A.log('Дозор', 'Колоссальный выпустил раскалённый пар! Всё в радиусе ~110 м обжигает — бойцов отбросило.', 'warn'); }
+      }
       A.float(t.x, t.y - t.def.h - 8, t.steamOn ? 'ПАР!' : 'Пар иссяк — загривок открыт', t.steamOn ? '#ffffff' : '#9fffb0', true);
     }
     if (t.steamOn) {
-      if (Math.random() < dt * 6) A.puff(t.x + A.rand(-20, 20), t.y, A.rand(20, 110), { n: 2, col: ['#ffffff', '#e6e6e6'], spd: 25, up: 15, life: 1.6, size: 4, grow: 6 });
+      const R0 = t.steamR = 230;
+      // клубы пара вокруг всего тела
+      if (Math.random() < dt * 14) A.puff(t.x + A.rand(-30, 30), t.y + A.rand(-10, 10), A.rand(10, 120), { n: 3, col: ['#ffffff', '#f0ece6', '#e6e0d8'], spd: 60, up: 20, life: 2.2, size: 5, grow: 12, spread: 30 });
+      t.hp -= t.maxHp * 0.004 * dt; // пар сжигает его самого
+      if (t.hp <= 0) { killTitan(t, 'self'); return; }
       t.steamTick -= dt;
       if (t.steamTick <= 0) {
-        t.steamTick = 1;
+        t.steamTick = 0.25;
         for (const u of G.units) {
-          if (!A.unitAlive(u)) continue;
-          const inRange = A.dist(t, u) < 130 && (reachable(u) || (u.onWall && t.atWall && Math.abs(u.y - t.y) < 160));
-          if (!inRange) continue;
-          const p = u.card.kind === 'squad' ? 0.35 : u.card.ability === 'shifter' ? 1 : (1 - effEva(u)) * 3;
-          if (A.chance(p)) A.hitUnit(u, t, 'steam');
+          if (!A.unitAlive(u) || inTown(u)) continue;
+          const d = A.dist(t, u);
+          const wallOk = u.onWall && SDE(t) < HALF() + 90;
+          if (d > R0 || (u.onWall && !wallOk)) continue;
+          const k = 1 - d / R0;
+          if (u.card.ability === 'shifter' && u.form === 'titan') { u.titanHp -= 22 * k; if (u.titanHp <= 0) erenEmerge(u, 'сожжён паром'); continue; }
+          const rate = u.card.kind === 'squad' ? 1.0 : 0.75 * (1 - effEva(u) * 0.4);
+          u.heat = (u.heat || 0) + rate * (0.3 + k) * 0.25;
+          u.heatT = 0.5;
+          if (u.heat >= 1) { u.heat = 0; A.hitUnit(u, t, 'steam'); }
         }
       }
     }
@@ -519,11 +715,12 @@ window.AOT = window.AOT || {};
     let n = 0;
     for (const u of G.units) {
       if (!A.unitAlive(u) || A.distXY(u.x, u.y, x, y) > 34) continue;
+      const cover = u.onWall ? 0.3 : 1; // расчёты на стене прячутся за зубцами
       if (u.card.kind === 'squad') {
         const before = u.members;
-        for (let i = 0; i < before; i++) if (A.chance(0.4)) { A.hitUnit(u, null, 'rock'); n++; if (u.dead) break; }
+        for (let i = 0; i < before; i++) if (A.chance(0.32 * cover)) { A.hitUnit(u, null, 'rock'); n++; if (u.dead) break; }
       } else if (u.card.ability === 'shifter') { A.hitUnit(u, null, 'rock'); n++; }
-      else if (A.chance((1 - effEva(u)) * 4)) { A.hitUnit(u, null, 'rock'); n++; }
+      else if (A.chance((1 - effEva(u)) * 4 * cover)) { A.hitUnit(u, null, 'rock'); n++; }
     }
     if (n) G.rockHits.push({ t: G.t, n });
   }
@@ -653,6 +850,15 @@ window.AOT = window.AOT || {};
     u.thought = 'Расчёт у орудия';
     if (u.atkT > 0) return;
     const c = u.card.cannon;
+    // титан забрался на стену — пушка бесполезна, расчёт берётся за клинки
+    const climber = G.titans.find((t) => !t.dead && t.climbed && A.dist(t, u) < 40);
+    if (climber) {
+      u.atkT = u.card.atkCd * A.rand(0.9, 1.1);
+      A.damageTitan(climber, u.card.dmg * u.members * 1.4 * (G.auras.pyxis ? 1.3 : 1), u, { melee: true });
+      A.sparks(climber.x, climber.y, climber.def.h * 0.7);
+      u.thought = `Отбивается клинками: ${climber.def.name} на стене!`;
+      return;
+    }
     let best = null, bd = 1e9;
     for (const t of G.titans) {
       if (t.dead) continue;
@@ -988,7 +1194,7 @@ window.AOT = window.AOT || {};
     G.phase = 'wave';
     G.queue = G.nextQueue || prepQueue(G.wave);
     G.nextQueue = null;
-    G.waveT = 0;
+    G.waveT = 0; G.waveLosses = 0;
     G.hpMul = A.waveHpMul(G.wave);
     G.spdMul = A.waveSpeedMul(G.wave);
     if (G.erenRest) {
@@ -1019,8 +1225,10 @@ window.AOT = window.AOT || {};
   function waveClear() {
     G.phase = 'prep';
     G.prepT = 30;
-    const bonus = 8 + G.wave * 3;
+    const full = 8 + G.wave * 3;
+    const bonus = Math.round(full * [1, 0.75, 0.5, 0][G.unrestLvl]);
     G.points += bonus;
+    const taxNote = bonus < full ? ` (из ${full} — недовольство съело часть налогов)` : '';
     const pyx = !!G.auras.pyxis;
     const rep = G.wallMax * (pyx ? 0.14 : 0.06);
     G.wallHp = Math.min(G.wallMax, G.wallHp + rep);
@@ -1031,7 +1239,11 @@ window.AOT = window.AOT || {};
       if (u.card.ability === 'shifter' && u.form === 'titan') { u.stamina = Math.min(u.card.stamina, u.stamina + 15); }
       if (!u.card.wallOnly && !(u.onWall && u.card.cannon) && u.card.ability !== 'shifter') u.state = 'return';
     }
-    A.log('Штаб', `Волна ${G.wave} отбита! Награда: +${bonus} б. Гарнизон подлатал стену (+${Math.round(rep / G.wallMax * 100)}%).`, 'kill');
+    A.log('Штаб', `Волна ${G.wave} отбита! Награда: +${bonus} б.${taxNote} Гарнизон подлатал стену (+${Math.round(rep / G.wallMax * 100)}%).`, 'kill');
+    if (G.waveLosses <= 2) { A.addUnrest(-10); A.log('Народ', `Волна отбита почти без потерь (${G.waveLosses}) — горожане ликуют и верят в армию.`, 'kill'); }
+    else if (G.waveLosses >= 15) { A.addUnrest(5); A.log('Народ', `Победа, но какой ценой: ${G.waveLosses} погибших. Люди считают похоронки.`, 'loss'); }
+    else A.addUnrest(-4);
+    G.waveLosses = 0;
     A.intel();
   }
 
@@ -1045,11 +1257,11 @@ window.AOT = window.AOT || {};
     if (A.erwinRedeploy) A.erwinRedeploy(next.dirs, true);
     if (!sp.length) return;
     const tips = {
-      armored: 'Бронированный: лезвия бесполезны. Нужны громовые копья (Эрвин, Ханджи), Эрен или много пушек.',
-      jaw: 'Челюстной: быстрый охотник на героев. Помогут Саша (ослепляет) и Микаса.',
-      female: 'Женская особь: отвердевает. Два отряда рядом могут её сковать, если командует Эрвин.',
-      beast: 'Звероподобный: камнепад по всему полю. Держите людей за стеной или готовьте Леви/кавалерию.',
-      colossal: 'Колоссальный: пар. Атаковать только когда пар иссякнет.',
+      armored: 'Бронированный: лезвия бесполезны, таран сбрасывает расчёты со стены. Нужны громовые копья (Эрвин, Ханджи), Эрен или много пушек.',
+      jaw: 'Челюстной: маленький и быстрый, охотится на героев и взбирается на стену к пушкам. Помогут Саша (ослепляет) и Микаса.',
+      female: 'Женская особь: отвердевает, а тяжело раненая прячется в кристалл и лечится. Держите громовые копья.',
+      beast: 'Звероподобный: камнепад по полю, а его крик поднимает титанов прямо среди отрядов. Держите людей за стеной или готовьте Леви.',
+      colossal: 'Колоссальный: раскалённый пар обжигает всех на 110 м, даже на стене. Атаковать, только когда пар иссякнет.',
     };
     A.log('Разведка', `В следующей волне: ${sp.map((t) => tips[t]).join(' ')}`, 'warn');
   };
@@ -1089,6 +1301,9 @@ window.AOT = window.AOT || {};
     if (A.director) A.director(dt);
     updateProjs(dt);
     updateFx(dt);
+    updateUnrest(dt);
+    for (const u of G.units) if (u.heat > 0) { u.heatT = (u.heatT || 0) - dt; if (u.heatT <= 0) u.heat = Math.max(0, u.heat - dt * 0.3); }
+    if (G.flash > 0) G.flash -= dt;
 
     G.titans = G.titans.filter((t) => !t.dead || t.deadT < 1.2);
     G.units = G.units.filter((u) => !u.dead || u.deadT < 2);
@@ -1097,5 +1312,5 @@ window.AOT = window.AOT || {};
     if (G.wallHp <= 0) { G.wallHp = 0; gameOver(); }
   };
 
-  A._internal = { moveUnit, moveEnt, chooseTarget, effEva, nearestSupply, erenEmerge, engage };
+  A._internal = { moveUnit, moveEnt, chooseTarget, effEva, nearestSupply, erenEmerge, engage, canReach };
 })(window.AOT);
