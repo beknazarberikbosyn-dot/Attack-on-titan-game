@@ -13,6 +13,7 @@ window.AOT = window.AOT || {};
   }
 
   function boot() {
+    if (A.loadCustomTitans) A.loadCustomTitans();
     A.generateWorld();
     A.newGame();
     G.paused = true;

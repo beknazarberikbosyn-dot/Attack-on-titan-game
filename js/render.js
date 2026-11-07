@@ -247,6 +247,11 @@ window.AOT = window.AOT || {};
     c.drawImage(img, x, y, dw, dh);
     if (t.dead) { c.globalAlpha = Math.max(0, 0.85 * (1 - t.deadT / 1.2)); c.drawImage(whiteOf(img), x, y, dw, dh); c.globalAlpha = 1; return; } // испаряется
     // тлеющие трещины Колоссального пульсируют, в пару — разгораются
+    // свой спрайт: в пару тело раскаляется
+    if (img.custom && t.steamOn) {
+      c.globalAlpha = 0.16 + Math.max(0, Math.sin(time * 4 + t.id)) * 0.14;
+      c.drawImage(tintOf(img, '#ff8a3a'), x, y, dw, dh); c.globalAlpha = 1;
+    }
     if (img.glow) {
       c.globalCompositeOperation = 'lighter';
       c.globalAlpha = Math.max(0, 0.35 + Math.sin(time * 2.6 + t.id) * 0.18 + (t.steamOn ? 0.35 : 0));

@@ -381,6 +381,8 @@ window.AOT = window.AOT || {};
   A.titanSprite = function (type, variant, H, Wd, lvl) {
     if (type === 'eren') { H = EREN_DEF.h; Wd = EREN_DEF.w; }
     H = H || A.TITANS[type].h; Wd = Wd || A.TITANS[type].w;
+    const own = A.customTitanSprite && A.customTitanSprite(type, H); // нарисованный автором спрайт
+    if (own) return own;
     if (BUILD[type].theme) variant = 0; // у шифтеров один облик
     const key = type + ':' + variant + ':' + H + ':' + Wd + ':' + (lvl == null ? '' : lvl);
     if (!cache[key]) cache[key] = [0, 1, 2].map((f) => make(type, variant, H, Wd, f, lvl));
