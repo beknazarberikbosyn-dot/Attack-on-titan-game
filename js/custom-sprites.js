@@ -28,21 +28,6 @@ window.AOT = window.AOT || {};
     }
   };
 
-  // масштабирование картинки под рост титана (в пикселях спрайта) с чёткими краями
-  function scaled(img, th) {
-    const k = th / img.height, tw = Math.max(1, Math.round(img.width * k));
-    const cv = document.createElement('canvas'); cv.width = tw; cv.height = th;
-    const c = cv.getContext('2d');
-    c.imageSmoothingEnabled = k < 1; c.imageSmoothingQuality = 'high';
-    c.drawImage(img, 0, 0, tw, th);
-    try { // убрать полупрозрачную кайму от сглаживания
-      const id = c.getImageData(0, 0, tw, th), d = id.data;
-      for (let i = 3; i < d.length; i += 4) d[i] = d[i] > 110 ? 255 : 0;
-      c.putImageData(id, 0, 0);
-    } catch (e) { /* локальный file:// — оставляем как есть */ }
-    return cv;
-  }
-
   // тёмный контур в 1 пиксель, как у остальных титанов — чтобы не терялся на траве
   function outline(cv) {
     const c = cv.getContext('2d');
@@ -58,14 +43,16 @@ window.AOT = window.AOT || {};
     } catch (e) { /* file:// */ }
   }
 
+  // Картинка не пережимается: кадр остаётся в родном разрешении рисунка, а под рост титана
+  // его масштабирует уже отрисовка (cv.s = пикселей рисунка на пиксель мира) — пиксели остаются чёткими.
   function buildFrame(type, H, f) {
-    const ct = A.customTitans[type], S = A.SPRITE_SCALE || 2;
-    const th = Math.round(H * S);
+    const ct = A.customTitans[type];
     const own = ct.frames[f];
-    const src = scaled(own || ct.base, th);
-    const tw = src.width, pad = Math.ceil(th * 0.05) + 2;
+    const src = own || ct.base;
+    const tw = src.width, th = src.height, pad = Math.ceil(th * 0.05) + 2;
     const cv = document.createElement('canvas'); cv.width = tw + pad * 2; cv.height = th + pad;
     const c = cv.getContext('2d');
+    c.imageSmoothingEnabled = false;
     if (own) c.drawImage(src, pad, pad);
     else {
       // автоанимация: ноги шагают по очереди, корпус покачивается; на замахе корпус подаётся вверх и вширь
@@ -75,15 +62,15 @@ window.AOT = window.AOT || {};
       c.drawImage(src, 0, legY, half, th - legY, pad, pad + legY - legL, half, th - legY);
       c.drawImage(src, half, legY, tw - half, th - legY, pad + half, pad + legY - legR, tw - half, th - legY);
       if (f === 2) {
-        const k = 1.05, up = lift * 2;
-        c.drawImage(src, 0, 0, tw, legY + 2, pad - tw * (k - 1) / 2, pad - up, tw * k, legY + 2 + up);
+        const up = lift * 2, ext = Math.max(1, Math.round(tw * 0.025));
+        c.drawImage(src, 0, 0, tw, legY + 1, pad - ext, pad - up, tw + ext * 2, legY + 1 + up);
       } else {
         const dx = f === 0 ? -sway : sway;
-        c.drawImage(src, 0, 0, tw, legY + 2, pad + dx, pad - Math.round(lift / 2), tw, legY + 2);
+        c.drawImage(src, 0, 0, tw, legY + 1, pad + dx, pad - Math.round(lift / 2), tw, legY + 1);
       }
     }
     outline(cv);
-    cv.s = S; cv.custom = true;
+    cv.s = th / H; cv.custom = true;
     return cv;
   }
 

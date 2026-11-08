@@ -247,6 +247,11 @@ window.AOT = window.AOT || {};
     c.drawImage(img, x, y, dw, dh);
     if (t.dead) { c.globalAlpha = Math.max(0, 0.85 * (1 - t.deadT / 1.2)); c.drawImage(whiteOf(img), x, y, dw, dh); c.globalAlpha = 1; return; } // испаряется
     // тлеющие трещины Колоссального пульсируют, в пару — разгораются
+    // свой спрайт метателя: перед броском держит валун над головой
+    if (img.custom && t.def.thrower && t.grabT > 0) {
+      const r = Math.max(2.5, t.def.w * 0.28);
+      ell(c, t.x, y - r * 1.2, r, r * 0.85, '#8a857c'); ell(c, t.x - r * 0.3, y - r * 1.5, r * 0.4, r * 0.3, '#a8a296');
+    }
     // свой спрайт: в пару тело раскаляется
     if (img.custom && t.steamOn) {
       c.globalAlpha = 0.16 + Math.max(0, Math.sin(time * 4 + t.id)) * 0.14;
@@ -269,7 +274,7 @@ window.AOT = window.AOT || {};
       for (let i = 0; i < 4; i++) if (Math.sin(time * 5 + i * 1.7) > 0.7) c.fillRect(t.x + (A.hash(t.id, i, 5) - 0.5) * t.def.w, y + dh * A.hash(t.id, i, 6), 1, 1);
       c.globalAlpha = 1;
     }
-    if (t.hitFlash > 0) { c.globalAlpha = 0.7; c.drawImage(whiteOf(img), x, y, dw, dh); c.globalAlpha = 1; }
+    if (t.hitFlash > 0) { c.globalAlpha = img.custom ? 0.35 : 0.7; c.drawImage(whiteOf(img), x, y, dw, dh); c.globalAlpha = 1; }
     if (t.hardenT > 0 && t.crystalT <= 0) { c.globalAlpha = 0.55; c.fillStyle = '#bfe6ff'; c.fillRect(t.x - t.def.w * 0.2, y + dh * 0.14, t.def.w * 0.4, Math.max(1.5, dh * 0.08)); c.globalAlpha = 1; }
     // ярость
     if (t.enrageT > 0) { c.fillStyle = '#ff4a3a'; c.fillRect(t.x - t.def.w * 0.12, y + dh * 0.06, 1, 0.6); c.fillRect(t.x + t.def.w * 0.08, y + dh * 0.06, 1, 0.6); }

@@ -5,4 +5,5 @@
 // Типы: colossal, armored, female, beast, jaw, normal, small, deviant, eren
 window.AOT_TITAN_SPRITES = {
   colossal: { base: 'colossal.png', legsFrom: 0.5 },
+  beast: { base: 'beast.png', legsFrom: 0.69 },
 };
